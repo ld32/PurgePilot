@@ -17,6 +17,13 @@ from .llm_client import PurgeEstimate, estimate_purge_confidence, _SYSTEM_PROMPT
 from .scanner import ScanResult, scan_directory
 
 
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be >= 1")
+    return parsed
+
+
 def parse_config(config_path: Path) -> dict:
     """Parse the markdown config file."""
     with open(config_path, encoding='utf-8') as f:
@@ -218,6 +225,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Maximum recursion depth when scanning directories (default: 10).",
     )
     parser.add_argument(
+        "--processes",
+        type=_positive_int,
+        default=1,
+        metavar="INT",
+        help="Number of worker processes used while scanning (default: 1).",
+    )
+    parser.add_argument(
         "--include-hidden",
         action="store_true",
         help="Include hidden files and directories (names starting with '.').",
@@ -288,6 +302,7 @@ def _build_subcommand_parser() -> argparse.ArgumentParser:
         help="One or more directories to scan (e.g. ~ for your home directory).",
     )
     scan_parser.add_argument("--max-depth", type=int, default=10, metavar="INT")
+    scan_parser.add_argument("--processes", type=_positive_int, default=1, metavar="INT")
     scan_parser.add_argument("--include-hidden", action="store_true")
     scan_parser.add_argument("--output", choices=["text", "json"], default="text")
     scan_parser.add_argument("--save-scan", metavar="FILE")
@@ -440,6 +455,7 @@ def main(argv: List[str] | None = None) -> int:
         if subcommand_args.command == "scan":
             translated_argv = [*subcommand_args.directories, "--scan-only"]
             translated_argv.extend(["--max-depth", str(subcommand_args.max_depth)])
+            translated_argv.extend(["--processes", str(subcommand_args.processes)])
             translated_argv.extend(["--output", subcommand_args.output])
             translated_argv.extend(["--config", subcommand_args.config])
             if subcommand_args.save_commands:
@@ -570,6 +586,7 @@ def main(argv: List[str] | None = None) -> int:
                 dir_path,
                 max_depth=args.max_depth,
                 include_hidden=args.include_hidden,
+                processes=args.processes,
             )
         except Exception as exc:  # noqa: BLE001
             print(f"ERROR: Failed to scan {directory}: {exc}", file=sys.stderr)

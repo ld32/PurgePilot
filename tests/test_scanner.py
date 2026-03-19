@@ -151,3 +151,24 @@ def test_scan_result_from_dict_round_trip(simple_tree):
     assert recreated.root == result.root
     assert len(recreated.entries) == len(result.entries)
     assert recreated.total_size_bytes == result.total_size_bytes
+
+
+def test_scan_with_multiple_processes_matches_single_process(simple_tree):
+    single = scan_directory(simple_tree, processes=1)
+    multi = scan_directory(simple_tree, processes=2)
+
+    single_by_path = {entry.path: entry for entry in single.entries}
+    multi_by_path = {entry.path: entry for entry in multi.entries}
+    assert single_by_path.keys() == multi_by_path.keys()
+
+    for path in single_by_path:
+        left = single_by_path[path]
+        right = multi_by_path[path]
+        assert left.is_dir == right.is_dir
+        assert left.size_bytes == right.size_bytes
+        assert left.depth == right.depth
+
+
+def test_scan_rejects_non_positive_process_count(simple_tree):
+    with pytest.raises(ValueError):
+        scan_directory(simple_tree, processes=0)

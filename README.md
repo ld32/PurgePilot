@@ -329,6 +329,7 @@ purgep ~/Downloads --api-url https://api.openai.com/v1 --model gpt-4o
 | `--api-key TOKEN` | *(none)* | Bearer token for the API |
 | `--threshold FLOAT` | `0.7` | Confidence cut-off for "high risk" summary |
 | `--max-depth INT` | `10` | Maximum recursion depth |
+| `--processes INT` | `1` | Number of worker processes used while scanning |
 | `--include-hidden` | *(off)* | Include hidden files/dirs (`.` prefix) |
 | `--output text\|json` | `text` | Output format |
 | `--timeout SECONDS` | `120` | HTTP request timeout |

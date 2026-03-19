@@ -158,6 +158,15 @@ def test_main_scan_passes_include_hidden(tmp_path):
     assert kwargs["include_hidden"] is True
 
 
+def test_main_scan_passes_processes(tmp_path):
+    with patch("purge_pilot.main.scan_directory") as mock_scan:
+        mock_scan.return_value = MagicMock(entries=[], total_size_bytes=0)
+        main(["scan", str(tmp_path), "--processes", "3"])
+
+    _, kwargs = mock_scan.call_args
+    assert kwargs["processes"] == 3
+
+
 def test_main_scan_only_saves_scan_file(tmp_path, capsys):
     scan_json = tmp_path / "scan.json"
     mocked_scan = MagicMock(entries=[], total_size_bytes=0)
