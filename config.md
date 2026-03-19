@@ -69,8 +69,8 @@ These are regenerable caches, build artefacts, and temporary files.
 - ~/.cache/pip/
 - ~/.cache/huggingface/
 - ~/.cache/torch/
-- ~/ondemand/
-- ~/tmp/
+- ~/ondemand/ 
+- ~/tmp/ 
 - *.tmp
 - *.o
 - *.pyc
