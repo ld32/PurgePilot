@@ -1,0 +1,15 @@
+name: purge-pilot
+channels:
+  - conda-forge
+  - defaults
+variables:
+  OLLAMA_MAX_LOADED_MODELS: "1"
+  OLLAMA_NUM_PARALLEL: "1"
+  OLLAMA_KEEP_ALIVE: "5m"
+dependencies:
+  - python>=3.9
+  - requests>=2.31.0
+  - ollama
+  - pip
+  - pip:
+      - ".[dev]"
