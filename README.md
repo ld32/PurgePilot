@@ -380,19 +380,19 @@ purgep ~/Downloads --api-url https://api.openai.com/v1 --model gpt-4o
 
 ```
 Scanning /mnt/data/backups …
-  Found 42 entries (15,728,640,000 bytes). Querying LLM …
+  Found 9 entries (15,728,640,000 bytes). Querying LLM in 1 batch(es) of up to 50 entries …
 
 Purge confidence report for: /mnt/data/backups
 ------------------------------------------------------------------------
-🔴  [████████████████████] 0.97  2019-full-backup.tar.gz
-        4-year-old full backup, almost certainly superseded by newer snapshots.
-🔴  [███████████████░░░░░] 0.82  logs/access.log.2021
-        Rotated log file from 2021, no longer needed for operations.
-🟢  [███░░░░░░░░░░░░░░░░░] 0.18  datasets/current_month.csv
-        Actively-used dataset modified recently.
+🔴  [████████████████████] 0.94  archive_runs
+  Directory has 120 files, 118 older than 90 days, mostly .bam outputs that look stale.
+🔴  [████████████████░░░░] 0.83  logs
+  Directory contains mostly old rotated logs and appears safe to purge or move.
+🟢  [███░░░░░░░░░░░░░░░░░] 0.16  datasets
+  Directory includes recently modified data files and likely active project inputs.
 ...
 
-Summary: 15 of 42 entries above confidence threshold 0.70
+Summary: 4 of 9 entries above confidence threshold 0.70
 ```
 
 ---
