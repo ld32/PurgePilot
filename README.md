@@ -204,6 +204,18 @@ less review_purge.sh
 bash review_purge.sh
 ```
 
+> **Context window tip:** Small models default to a 4096-token context, which
+> may be too narrow for large scans.  Use `--num-ctx` to increase it and
+> `--batch-size` to control how many entries are sent per request:
+> ```bash
+> purgep query home_scan.json \
+>   --api-url http://localhost:11434/v1 \
+>   --model phi3:mini \
+>   --num-ctx 8192 \
+>   --batch-size 80 \
+>   --save-commands review_purge.sh
+> ```
+
 ### Scan a specific subdirectory
 
 ```bash
@@ -279,9 +291,19 @@ purgep query scan.json \
   --save-commands review-purge.sh
 ```
 
-The generated script contains suggested `mv`/`rm` commands only. PurgePilot
-does not execute them automatically; review the file first, then run it
-yourself if it looks correct.
+`--save-commands` writes a ready-to-review `bash` script.  For each entry
+above the confidence threshold the script contains:
+- A comment line showing the path, confidence score and reason
+- Either `rm -f/-rf` for entries listed under **Trash Data** in `config.md`
+- Or `mkdir -p` + `mv -n` to move the item into your recycle-bin path
+
+The script is **not executed automatically**; inspect it with `less` or your
+editor, remove any lines you disagree with, then run it yourself.
+
+```bash
+less review-purge.sh   # inspect
+bash review-purge.sh   # run when satisfied
+```
 
 ### Examples
 
@@ -323,7 +345,7 @@ purgep ~/Downloads --api-url https://api.openai.com/v1 --model gpt-4o
 | `--scan-only` | *(off)* | Only scan directories and output scan data (skip LLM query) |
 | `--save-scan FILE` | *(none)* | Save scan JSON to a file (single directory only) |
 | `--from-scan FILE [FILE ...]` | *(none)* | Load saved scan JSON and run only the LLM query step |
-| `--save-commands FILE` | *(none)* | Write suggested review commands to a shell script |
+| `--save-commands FILE` | *(none)* | Write suggested `mv`/`rm` review commands to a shell script; inspect before running |
 | `--api-url URL` | `http://localhost:11434/v1` | OpenAI-compatible API base URL |
 | `--model NAME` | `llama3` | LLM model name |
 | `--api-key TOKEN` | *(none)* | Bearer token for the API |
@@ -333,6 +355,8 @@ purgep ~/Downloads --api-url https://api.openai.com/v1 --model gpt-4o
 | `--include-hidden` | *(off)* | Include hidden files/dirs (`.` prefix) |
 | `--output text\|json` | `text` | Output format |
 | `--timeout SECONDS` | `120` | HTTP request timeout |
+| `--batch-size INT` | `50` | Entries per LLM request; reduce for small-context models |
+| `--num-ctx INT` | *(model default)* | Ollama context window size in tokens (e.g. `8192`); passed via `options.num_ctx` |
 | `-v, --verbose` | *(off)* | Enable debug logging |
 
 ---
