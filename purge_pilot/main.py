@@ -250,6 +250,20 @@ def _build_parser() -> argparse.ArgumentParser:
         help="HTTP request timeout in seconds (default: 120).",
     )
     parser.add_argument(
+        "--batch-size",
+        type=_positive_int,
+        default=50,
+        metavar="INT",
+        help="Number of entries per LLM request (default: 50). Reduce for models with small context windows.",
+    )
+    parser.add_argument(
+        "--num-ctx",
+        type=_positive_int,
+        default=None,
+        metavar="INT",
+        help="Ollama num_ctx option: context window size in tokens (e.g. 8192). Uses model default if unset.",
+    )
+    parser.add_argument(
         "-v", "--verbose",
         action="store_true",
         help="Enable verbose/debug logging.",
@@ -330,6 +344,8 @@ def _build_subcommand_parser() -> argparse.ArgumentParser:
     query_parser.add_argument("--threshold", type=float, default=0.7, metavar="FLOAT")
     query_parser.add_argument("--output", choices=["text", "json"], default="text")
     query_parser.add_argument("--timeout", type=int, default=120, metavar="SECONDS")
+    query_parser.add_argument("--batch-size", type=_positive_int, default=50, metavar="INT")
+    query_parser.add_argument("--num-ctx", type=_positive_int, default=None, metavar="INT")
     query_parser.add_argument("--save-commands", metavar="FILE")
     query_parser.add_argument("--config", default="config.md")
     query_parser.add_argument("-v", "--verbose", action="store_true")
@@ -360,10 +376,13 @@ def _apply_config_overrides(report, config: dict) -> None:
 
 
 def _query_scan_result(args, scan_result: ScanResult, system_prompt: str):
+    batch_size = getattr(args, "batch_size", 50)
+    num_ctx = getattr(args, "num_ctx", None)
+    n_batches = max(1, -(-len(scan_result.entries) // batch_size))
     print(
         f"  Found {len(scan_result.entries)} entries "
         f"({scan_result.total_size_bytes:,} bytes). "
-        f"Querying LLM …",
+        f"Querying LLM in {n_batches} batch(es) of up to {batch_size} entries …",
         file=sys.stderr,
     )
 
@@ -374,6 +393,8 @@ def _query_scan_result(args, scan_result: ScanResult, system_prompt: str):
         api_key=args.api_key,
         timeout=args.timeout,
         system_prompt=system_prompt,
+        batch_size=batch_size,
+        num_ctx=num_ctx,
     )
     return report
 
@@ -473,6 +494,9 @@ def main(argv: List[str] | None = None) -> int:
             translated_argv.extend(["--threshold", str(subcommand_args.threshold)])
             translated_argv.extend(["--output", subcommand_args.output])
             translated_argv.extend(["--timeout", str(subcommand_args.timeout)])
+            translated_argv.extend(["--batch-size", str(subcommand_args.batch_size)])
+            if subcommand_args.num_ctx is not None:
+                translated_argv.extend(["--num-ctx", str(subcommand_args.num_ctx)])
             translated_argv.extend(["--config", subcommand_args.config])
             if subcommand_args.save_commands:
                 translated_argv.extend(["--save-commands", subcommand_args.save_commands])

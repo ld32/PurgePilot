@@ -101,6 +101,8 @@ def estimate_purge_confidence(
     api_key: Optional[str] = None,
     timeout: int = 120,
     system_prompt: str = _SYSTEM_PROMPT,
+    batch_size: int = 50,
+    num_ctx: Optional[int] = None,
 ) -> PurgeReport:
     """Call the LLM server and return a :class:`PurgeReport`.
 
@@ -121,51 +123,65 @@ def estimate_purge_confidence(
         HTTP request timeout in seconds.
     system_prompt:
         The system prompt to use for the LLM.
+    batch_size:
+        Number of entries to send per LLM request. Smaller values keep the
+        prompt within the model's context window.
+    num_ctx:
+        Ollama ``num_ctx`` option (context window size in tokens). Pass
+        ``None`` to use the model's default.
     """
-    entries_json = json.dumps(
-        [e.to_dict() for e in scan_result.entries],
-        indent=2,
-    )
-
     headers: Dict[str, str] = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": entries_json},
-        ],
-        "temperature": 0.2,
-    }
-
     endpoint = api_url.rstrip("/") + "/chat/completions"
-    logger.debug("POST %s  model=%s  entries=%d", endpoint, model, len(scan_result.entries))
-    allowed_paths = {entry.path for entry in scan_result.entries}
+    entries = scan_result.entries
+    all_estimates: List[PurgeEstimate] = []
 
-    content = _request_completion(
-        endpoint=endpoint,
-        headers=headers,
-        payload=payload,
-        timeout=timeout,
-    )
+    batches = [entries[i:i + batch_size] for i in range(0, max(len(entries), 1), batch_size)]
+    for batch_index, batch in enumerate(batches):
+        logger.debug(
+            "POST %s  model=%s  batch=%d/%d  entries=%d",
+            endpoint, model, batch_index + 1, len(batches), len(batch),
+        )
+        entries_json = json.dumps([e.to_dict() for e in batch], indent=2)
+        allowed_paths = {entry.path for entry in batch}
 
-    try:
-        estimates = _parse_estimates(content, allowed_paths=allowed_paths)
-    except ValueError as exc:
-        logger.debug("LLM returned malformed JSON; requesting repair: %s", exc)
-        repaired_content = _repair_completion(
+        payload: Dict[str, Any] = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": entries_json},
+            ],
+            "temperature": 0.2,
+        }
+        if num_ctx is not None:
+            payload["options"] = {"num_ctx": num_ctx}
+
+        content = _request_completion(
             endpoint=endpoint,
             headers=headers,
-            model=model,
+            payload=payload,
             timeout=timeout,
-            original_content=content,
-            allowed_paths=sorted(allowed_paths),
         )
-        estimates = _parse_estimates(repaired_content, allowed_paths=allowed_paths)
 
-    return PurgeReport(root=scan_result.root, estimates=estimates)
+        try:
+            estimates = _parse_estimates(content, allowed_paths=allowed_paths)
+        except ValueError as exc:
+            logger.debug("LLM returned malformed JSON; requesting repair: %s", exc)
+            repaired_content = _repair_completion(
+                endpoint=endpoint,
+                headers=headers,
+                model=model,
+                timeout=timeout,
+                original_content=content,
+                allowed_paths=sorted(allowed_paths),
+            )
+            estimates = _parse_estimates(repaired_content, allowed_paths=allowed_paths)
+
+        all_estimates.extend(estimates)
+
+    return PurgeReport(root=scan_result.root, estimates=all_estimates)
 
 
 # ---------------------------------------------------------------------------
