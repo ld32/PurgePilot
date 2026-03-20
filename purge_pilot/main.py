@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import collections
 import fnmatch
 import json
 import logging
@@ -10,11 +11,12 @@ import os
 import re
 import shlex
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List
 
 from .llm_client import PurgeEstimate, estimate_purge_confidence, _SYSTEM_PROMPT
-from .scanner import ScanResult, scan_directory
+from .scanner import FileEntry, ScanResult, scan_directory
 
 
 def _positive_int(value: str) -> int:
@@ -124,6 +126,89 @@ def _filter_ai_scan_entries(scan_result: ScanResult, config: dict) -> ScanResult
         and not _is_recycle_bin_path(entry.path, config)
     ]
     return ScanResult(root=scan_result.root, entries=filtered_entries)
+
+
+def _build_directory_summary_scan(scan_result: ScanResult) -> ScanResult:
+    """Collapse file-level scan entries into directory-level summary entries."""
+    dir_entries = [entry for entry in scan_result.entries if entry.is_dir]
+    if not dir_entries:
+        return scan_result
+
+    now = datetime.now(timezone.utc)
+    by_path = {
+        entry.path: {
+            "entry": entry,
+            "file_count": 0,
+            "total_file_bytes": 0,
+            "older_than_30_days": 0,
+            "older_than_90_days": 0,
+            "extensions": collections.Counter(),
+        }
+        for entry in dir_entries
+    }
+
+    for entry in scan_result.entries:
+        if entry.is_dir:
+            continue
+
+        age_days = 0
+        modified_at = entry.modified_at
+        if modified_at.tzinfo is None:
+            modified_at = modified_at.replace(tzinfo=timezone.utc)
+        age_days = max(0, (now - modified_at).days)
+
+        suffix = Path(entry.path).suffix.lower() or "<no_ext>"
+        parts = Path(entry.path).parts
+        for idx in range(1, len(parts)):
+            parent = str(Path(*parts[:idx]))
+            stats = by_path.get(parent)
+            if stats is None:
+                continue
+            stats["file_count"] += 1
+            stats["total_file_bytes"] += entry.size_bytes
+            if age_days >= 30:
+                stats["older_than_30_days"] += 1
+            if age_days >= 90:
+                stats["older_than_90_days"] += 1
+            stats["extensions"][suffix] += 1
+
+    summary_entries = []
+    for path, stats in by_path.items():
+        ext_counter = stats["extensions"]
+        top_extensions = [
+            {"ext": ext, "count": count}
+            for ext, count in sorted(ext_counter.items(), key=lambda item: (-item[1], item[0]))[:5]
+        ]
+        metadata = {
+            "summary_type": "directory_stats",
+            "file_count": stats["file_count"],
+            "total_file_bytes": stats["total_file_bytes"],
+            "older_than_30_days": stats["older_than_30_days"],
+            "older_than_90_days": stats["older_than_90_days"],
+            "top_extensions": top_extensions,
+        }
+        if stats["file_count"] > 0 and len(ext_counter) == 1:
+            metadata["all_files_extension"] = top_extensions[0]["ext"]
+
+        summary_entries.append(
+            FileEntry(
+                path=path,
+                is_dir=True,
+                size_bytes=stats["total_file_bytes"],
+                modified_at=stats["entry"].modified_at,
+                depth=stats["entry"].depth,
+                metadata=metadata,
+            )
+        )
+
+    # Keep root-level files as-is so files directly under the scan root are not dropped.
+    root_level_files = [
+        entry for entry in scan_result.entries if not entry.is_dir and "/" not in entry.path
+    ]
+    summary_entries.extend(root_level_files)
+
+    summary_entries.sort(key=lambda entry: (entry.depth, entry.path))
+    return ScanResult(root=scan_result.root, entries=summary_entries)
 
 
 def _ensure_rule_based_entries_in_report(report, full_scan_result: ScanResult, config: dict) -> None:
@@ -563,6 +648,7 @@ def main(argv: List[str] | None = None) -> int:
             try:
                 full_scan_result = _load_scan_result(scan_path)
                 ai_scan_result = _filter_ai_scan_entries(full_scan_result, config)
+                ai_scan_result = _build_directory_summary_scan(ai_scan_result)
                 report = _query_scan_result(args, ai_scan_result, system_prompt)
             except Exception as exc:  # noqa: BLE001
                 print(f"ERROR: Failed to query from scan file {scan_file}: {exc}", file=sys.stderr)
@@ -624,6 +710,7 @@ def main(argv: List[str] | None = None) -> int:
 
         try:
             ai_scan_result = _filter_ai_scan_entries(scan_result, config)
+            ai_scan_result = _build_directory_summary_scan(ai_scan_result)
             report = _query_scan_result(args, ai_scan_result, system_prompt)
         except Exception as exc:  # noqa: BLE001
             print(f"ERROR: LLM request failed for {directory}: {exc}", file=sys.stderr)

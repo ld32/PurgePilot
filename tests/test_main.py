@@ -503,3 +503,103 @@ test prompt
     assert str(tmp_path / "recycle_bin" / "old.tar.gz") in script
     assert str(tmp_path / "recycle_bin" / "old_exports" / "data.zip") in script
     assert "Saved" in capsys.readouterr().err
+
+
+def test_main_query_uses_directory_summary_by_default(tmp_path):
+    scan_file = tmp_path / "scan-folder-summary.json"
+    scan_file.write_text(
+        json.dumps(
+            {
+                "root": str(tmp_path),
+                "entries": [
+                    {
+                        "path": "proj",
+                        "is_dir": True,
+                        "size_bytes": 0,
+                        "modified_at": "2024-01-01T00:00:00+00:00",
+                        "depth": 0,
+                    },
+                    {
+                        "path": "proj/a.bam",
+                        "is_dir": False,
+                        "size_bytes": 100,
+                        "modified_at": "2023-01-01T00:00:00+00:00",
+                        "depth": 1,
+                    },
+                    {
+                        "path": "proj/b.bam",
+                        "is_dir": False,
+                        "size_bytes": 200,
+                        "modified_at": "2023-01-02T00:00:00+00:00",
+                        "depth": 1,
+                    },
+                    {
+                        "path": "proj/notes.txt",
+                        "is_dir": False,
+                        "size_bytes": 10,
+                        "modified_at": "2026-01-01T00:00:00+00:00",
+                        "depth": 1,
+                    },
+                ],
+            }
+        )
+    )
+
+    report = _mock_report(str(tmp_path), estimates=[
+        PurgeEstimate(path="proj", confidence=0.8, reason="mostly old data")
+    ])
+
+    with patch("purge_pilot.main.estimate_purge_confidence", return_value=report) as mock_estimate:
+        rc = main([
+            "query",
+            str(scan_file),
+            "--api-url",
+            "http://localhost:11434/v1",
+            "--model",
+            "llama3",
+        ])
+
+    assert rc == 0
+    ai_scan = mock_estimate.call_args[0][0]
+    assert [entry.path for entry in ai_scan.entries] == ["proj"]
+    assert ai_scan.entries[0].metadata is not None
+    assert ai_scan.entries[0].metadata["summary_type"] == "directory_stats"
+    assert ai_scan.entries[0].metadata["file_count"] == 3
+
+
+def test_main_query_directory_summary_keeps_root_level_files(tmp_path):
+    scan_file = tmp_path / "scan-root-files.json"
+    scan_file.write_text(
+        json.dumps(
+            {
+                "root": str(tmp_path),
+                "entries": [
+                    {
+                        "path": "root.log",
+                        "is_dir": False,
+                        "size_bytes": 50,
+                        "modified_at": "2024-01-01T00:00:00+00:00",
+                        "depth": 0,
+                    },
+                ],
+            }
+        )
+    )
+
+    report = _mock_report(str(tmp_path), estimates=[
+        PurgeEstimate(path="root.log", confidence=0.8, reason="old root file")
+    ])
+
+    with patch("purge_pilot.main.estimate_purge_confidence", return_value=report) as mock_estimate:
+        rc = main([
+            "query",
+            str(scan_file),
+            "--api-url",
+            "http://localhost:11434/v1",
+            "--model",
+            "llama3",
+        ])
+
+    assert rc == 0
+    ai_scan = mock_estimate.call_args[0][0]
+    assert [entry.path for entry in ai_scan.entries] == ["root.log"]

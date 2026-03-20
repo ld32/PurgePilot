@@ -204,9 +204,9 @@ less review_purge.sh
 bash review_purge.sh
 ```
 
-> **Context window tip:** Small models default to a 4096-token context, which
-> may be too narrow for large scans.  Use `--num-ctx` to increase it and
-> `--batch-size` to control how many entries are sent per request:
+> **Context window tip:** Query mode sends directory-level summary stats by
+> default (counts, age buckets, top extensions), which keeps prompts smaller.
+> For very large scans, also use `--num-ctx` and tune `--batch-size`:
 > ```bash
 > purgep query home_scan.json \
 >   --api-url http://localhost:11434/v1 \

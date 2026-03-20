@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -142,6 +143,19 @@ def test_file_entry_from_dict_round_trip(simple_tree):
     assert recreated.is_dir == file_a.is_dir
     assert recreated.size_bytes == file_a.size_bytes
     assert recreated.depth == file_a.depth
+
+
+def test_file_entry_round_trip_with_metadata():
+    entry = FileEntry(
+        path="work",
+        is_dir=True,
+        size_bytes=123,
+        modified_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        depth=0,
+        metadata={"summary_type": "directory_stats", "file_count": 20},
+    )
+    recreated = FileEntry.from_dict(entry.to_dict())
+    assert recreated.metadata == {"summary_type": "directory_stats", "file_count": 20}
 
 
 def test_scan_result_from_dict_round_trip(simple_tree):

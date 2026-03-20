@@ -7,7 +7,7 @@ from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator, List
+from typing import Any, Iterator, List
 
 
 @dataclass
@@ -19,15 +19,19 @@ class FileEntry:
     size_bytes: int
     modified_at: datetime
     depth: int
+    metadata: dict[str, Any] | None = None
 
     def to_dict(self) -> dict:
-        return {
+        payload = {
             "path": self.path,
             "is_dir": self.is_dir,
             "size_bytes": self.size_bytes,
             "modified_at": self.modified_at.isoformat(),
             "depth": self.depth,
         }
+        if self.metadata is not None:
+            payload["metadata"] = self.metadata
+        return payload
 
     @classmethod
     def from_dict(cls, data: dict) -> "FileEntry":
@@ -37,6 +41,7 @@ class FileEntry:
             size_bytes=int(data["size_bytes"]),
             modified_at=datetime.fromisoformat(str(data["modified_at"])),
             depth=int(data["depth"]),
+            metadata=data.get("metadata") if isinstance(data.get("metadata"), dict) else None,
         )
 
 
