@@ -176,6 +176,7 @@ bash review_purge.sh
 
 ---
 
+
 ## Usage
 
 ```
@@ -225,6 +226,20 @@ purgep query old_project_scan.json \
   --model llama3.2:3b
 ```
 
+
+### Scan a list of folders from a file
+
+If you have a text file (e.g., `folder_list.txt`) with one folder path per line, you can scan all those folders and output a combined JSON summary:
+
+```bash
+purgep scanFolderList folder_list.txt --save-scan combined_scan.json
+```
+
+This will scan each folder listed in `folder_list.txt` and write a combined scan result to `combined_scan.json` (or print to stdout if `--save-scan` is omitted).
+
+You can also use `--output text` to print a summary for each scanned folder.
+
+---
 ### JSON output (for scripting)
 
 ```bash
