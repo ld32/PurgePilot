@@ -29,8 +29,8 @@ approve and run the generated shell script.
 ## How it works
 
 1. **Scan** – PurgePilot walks your home directory (or any subdirectory) and
-   collects metadata (path, size, last-modified timestamp) for every file and
-   sub-folder.
+  collects metadata (path, size, last-modified timestamp, last-accessed timestamp) for every file and
+  sub-folder.
 2. **Ask** – The file list is sent as a prompt to any
    [OpenAI-compatible](https://platform.openai.com/docs/api-reference/chat)
    chat-completions endpoint (local [Ollama](https://ollama.com), OpenAI, etc.).

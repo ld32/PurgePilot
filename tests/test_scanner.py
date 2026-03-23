@@ -123,6 +123,7 @@ def test_file_entry_to_dict(simple_tree):
     assert d["is_dir"] is False
     assert d["size_bytes"] == len("hello")
     assert "modified_at" in d
+    assert "accessed_at" in d
     assert d["depth"] == 0
 
 
@@ -143,6 +144,7 @@ def test_file_entry_from_dict_round_trip(simple_tree):
     assert recreated.is_dir == file_a.is_dir
     assert recreated.size_bytes == file_a.size_bytes
     assert recreated.depth == file_a.depth
+    assert recreated.accessed_at == file_a.accessed_at
 
 
 def test_file_entry_round_trip_with_metadata():

@@ -196,6 +196,7 @@ def _build_directory_summary_scan(scan_result: ScanResult) -> ScanResult:
                 is_dir=True,
                 size_bytes=stats["total_file_bytes"],
                 modified_at=stats["entry"].modified_at,
+                accessed_at=stats["entry"].accessed_at,
                 depth=stats["entry"].depth,
                 metadata=metadata,
             )

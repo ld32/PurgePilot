@@ -18,8 +18,10 @@ class FileEntry:
     is_dir: bool
     size_bytes: int
     modified_at: datetime
+    accessed_at: datetime
     depth: int
     metadata: dict[str, Any] | None = None
+
 
     def to_dict(self) -> dict:
         payload = {
@@ -27,6 +29,7 @@ class FileEntry:
             "is_dir": self.is_dir,
             "size_bytes": self.size_bytes,
             "modified_at": self.modified_at.isoformat(),
+            "accessed_at": self.accessed_at.isoformat(),
             "depth": self.depth,
         }
         if self.metadata is not None:
@@ -40,6 +43,7 @@ class FileEntry:
             is_dir=bool(data["is_dir"]),
             size_bytes=int(data["size_bytes"]),
             modified_at=datetime.fromisoformat(str(data["modified_at"])),
+            accessed_at=datetime.fromisoformat(str(data["accessed_at"])),
             depth=int(data["depth"]),
             metadata=data.get("metadata") if isinstance(data.get("metadata"), dict) else None,
         )
@@ -219,7 +223,9 @@ def _walk(
         except (OSError, PermissionError):
             continue
 
+
         modified_at = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+        accessed_at = datetime.fromtimestamp(stat.st_atime, tz=timezone.utc)
         is_dir = child.is_dir()
         size = 0 if is_dir else stat.st_size
 
@@ -228,6 +234,7 @@ def _walk(
             is_dir=is_dir,
             size_bytes=size,
             modified_at=modified_at,
+            accessed_at=accessed_at,
             depth=depth,
         )
 

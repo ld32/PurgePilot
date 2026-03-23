@@ -75,6 +75,7 @@ def test_main_json_output(tmp_path, capsys):
                         "is_dir": False,
                         "size_bytes": 123,
                         "modified_at": "2024-01-01T00:00:00+00:00",
+                        "accessed_at": "2024-01-01T00:00:00+00:00",
                         "depth": 0,
                     }
                 ],
