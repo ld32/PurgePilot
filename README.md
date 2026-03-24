@@ -420,3 +420,28 @@ tests/
 environment.yml    – conda environment (includes Ollama)
 pyproject.toml
 ```
+
+---
+
+## Developer-only: run without reinstall after code changes
+
+This workflow is only for developers who modified the code and do not want to
+reinstall the package after each script change.
+
+From the repository root, run the CLI directly from source:
+
+```bash
+python -m purge_pilot.main scan ~ --save-scan home_scan.json
+python -m purge_pilot.main query home_scan.json \
+  --api-url http://localhost:11434/v1 \
+  --model phi3:mini
+```
+
+If your environment does not resolve local imports automatically:
+
+```bash
+PYTHONPATH=. python -m purge_pilot.main --help
+```
+
+Using `python -m purge_pilot.main` runs your latest local edits immediately,
+so no reinstall step is required after modifying scripts.
