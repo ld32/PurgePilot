@@ -142,6 +142,9 @@ def _build_directory_summary_scan(scan_result: ScanResult) -> ScanResult:
             "total_file_bytes": 0,
             "older_than_30_days": 0,
             "older_than_90_days": 0,
+            "accessed_within_30_days": 0,
+            "accessed_within_90_days": 0,
+            "most_recent_access": None,
             "extensions": collections.Counter(),
         }
         for entry in dir_entries
@@ -151,11 +154,15 @@ def _build_directory_summary_scan(scan_result: ScanResult) -> ScanResult:
         if entry.is_dir:
             continue
 
-        age_days = 0
         modified_at = entry.modified_at
         if modified_at.tzinfo is None:
             modified_at = modified_at.replace(tzinfo=timezone.utc)
         age_days = max(0, (now - modified_at).days)
+
+        accessed_at = entry.accessed_at
+        if accessed_at is not None and accessed_at.tzinfo is None:
+            accessed_at = accessed_at.replace(tzinfo=timezone.utc)
+        access_age_days = max(0, (now - accessed_at).days) if accessed_at is not None else None
 
         suffix = Path(entry.path).suffix.lower() or "<no_ext>"
         parts = Path(entry.path).parts
@@ -170,6 +177,14 @@ def _build_directory_summary_scan(scan_result: ScanResult) -> ScanResult:
                 stats["older_than_30_days"] += 1
             if age_days >= 90:
                 stats["older_than_90_days"] += 1
+            if access_age_days is not None:
+                if access_age_days < 30:
+                    stats["accessed_within_30_days"] += 1
+                if access_age_days < 90:
+                    stats["accessed_within_90_days"] += 1
+                prev = stats["most_recent_access"]
+                if prev is None or accessed_at > prev:
+                    stats["most_recent_access"] = accessed_at
             stats["extensions"][suffix] += 1
 
     summary_entries = []
@@ -185,8 +200,12 @@ def _build_directory_summary_scan(scan_result: ScanResult) -> ScanResult:
             "total_file_bytes": stats["total_file_bytes"],
             "older_than_30_days": stats["older_than_30_days"],
             "older_than_90_days": stats["older_than_90_days"],
+            "accessed_within_30_days": stats["accessed_within_30_days"],
+            "accessed_within_90_days": stats["accessed_within_90_days"],
             "top_extensions": top_extensions,
         }
+        if stats["most_recent_access"] is not None:
+            metadata["most_recently_accessed_days_ago"] = max(0, (now - stats["most_recent_access"]).days)
         if stats["file_count"] > 0 and len(ext_counter) == 1:
             metadata["all_files_extension"] = top_extensions[0]["ext"]
 

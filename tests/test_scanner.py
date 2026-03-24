@@ -155,9 +155,26 @@ def test_file_entry_round_trip_with_metadata():
         modified_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
         depth=0,
         metadata={"summary_type": "directory_stats", "file_count": 20},
+        accessed_at=datetime(2025, 6, 1, tzinfo=timezone.utc),
     )
     recreated = FileEntry.from_dict(entry.to_dict())
     assert recreated.metadata == {"summary_type": "directory_stats", "file_count": 20}
+    assert recreated.accessed_at == datetime(2025, 6, 1, tzinfo=timezone.utc)
+
+
+def test_file_entry_accessed_at_absent_when_none():
+    """Entries without accessed_at (e.g. from old scan files) deserialize cleanly."""
+    entry = FileEntry(
+        path="old.txt",
+        is_dir=False,
+        size_bytes=5,
+        modified_at=datetime(2020, 1, 1, tzinfo=timezone.utc),
+        depth=0,
+    )
+    d = entry.to_dict()
+    assert "accessed_at" not in d
+    recreated = FileEntry.from_dict(d)
+    assert recreated.accessed_at is None
 
 
 def test_scan_result_from_dict_round_trip(simple_tree):

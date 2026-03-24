@@ -566,6 +566,8 @@ def test_main_query_uses_directory_summary_by_default(tmp_path):
     assert ai_scan.entries[0].metadata is not None
     assert ai_scan.entries[0].metadata["summary_type"] == "directory_stats"
     assert ai_scan.entries[0].metadata["file_count"] == 3
+    assert "accessed_within_30_days" in ai_scan.entries[0].metadata
+    assert "accessed_within_90_days" in ai_scan.entries[0].metadata
 
 
 def test_main_query_directory_summary_keeps_root_level_files(tmp_path):
