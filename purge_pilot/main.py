@@ -570,51 +570,6 @@ def _write_review_commands(command_file: Path, command_sections: list[list[str]]
 
 
 def main(argv: List[str] | None = None) -> int:
-        if argv and argv[0] == "scanFolderList":
-            subcommand_parser = _build_subcommand_parser()
-            subcommand_args = subcommand_parser.parse_args(argv)
-            folder_list_path = Path(subcommand_args.folder_list_file)
-            if not folder_list_path.exists():
-                print(f"ERROR: Folder list file not found: {folder_list_path}", file=sys.stderr)
-                return 1
-            with open(folder_list_path, "r", encoding="utf-8") as f:
-                folder_paths = [line.strip() for line in f if line.strip()]
-            scan_results = []
-            for folder in folder_paths:
-                dir_path = Path(folder)
-                if not dir_path.exists():
-                    print(f"ERROR: Directory not found: {folder}", file=sys.stderr)
-                    continue
-                if not dir_path.is_dir():
-                    print(f"ERROR: Not a directory: {folder}", file=sys.stderr)
-                    continue
-                print(f"Scanning {dir_path.resolve()} …", file=sys.stderr)
-                try:
-                    scan_result = scan_directory(
-                        dir_path,
-                        max_depth=subcommand_args.max_depth,
-                        include_hidden=subcommand_args.include_hidden,
-                        processes=subcommand_args.processes,
-                    )
-                    scan_results.append(scan_result)
-                except Exception as exc:
-                    print(f"ERROR: Failed to scan {folder}: {exc}", file=sys.stderr)
-                    continue
-            if subcommand_args.save_scan:
-                out_path = Path(subcommand_args.save_scan)
-                with open(out_path, "w", encoding="utf-8") as f:
-                    json.dump([result.to_dict() for result in scan_results], f, indent=2)
-                print(f"Saved combined scan JSON to {out_path.resolve()}", file=sys.stderr)
-            if subcommand_args.output == "json":
-                print(json.dumps([result.to_dict() for result in scan_results], indent=2))
-            else:
-                for result in scan_results:
-                    print(
-                        f"Scan summary for {result.root}: "
-                        f"{len(result.entries)} entries, "
-                        f"{result.total_size_bytes:,} bytes"
-                    )
-            return 0
     if argv is None:
         argv = sys.argv[1:]
 
