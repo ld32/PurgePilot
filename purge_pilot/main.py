@@ -403,22 +403,6 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _build_subcommand_parser() -> argparse.ArgumentParser:
-        folderlist_parser = subparsers.add_parser(
-            "scanFolderList",
-            help="Scan a list of folders from a text file and output combined scan JSON."
-        )
-        folderlist_parser.add_argument(
-            "folder_list_file",
-            metavar="FOLDER_LIST_FILE",
-            help="Path to a text file containing folder paths (one per line)."
-        )
-        folderlist_parser.add_argument("--max-depth", type=int, default=10, metavar="INT")
-        folderlist_parser.add_argument("--processes", type=_positive_int, default=1, metavar="INT")
-        folderlist_parser.add_argument("--include-hidden", action="store_true")
-        folderlist_parser.add_argument("--output", choices=["text", "json"], default="json")
-        folderlist_parser.add_argument("--save-scan", metavar="FILE")
-        folderlist_parser.add_argument("--config", default="config.md")
-        folderlist_parser.add_argument("-v", "--verbose", action="store_true")
     """Build a dedicated parser for explicit subcommands."""
     parser = argparse.ArgumentParser(
         prog="purgep",
