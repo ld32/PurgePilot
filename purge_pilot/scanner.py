@@ -18,7 +18,6 @@ class FileEntry:
     is_dir: bool
     size_bytes: int
     modified_at: datetime
-    accessed_at: datetime
     depth: int
     metadata: dict[str, Any] | None = None
     accessed_at: datetime | None = None
@@ -30,7 +29,6 @@ class FileEntry:
             "is_dir": self.is_dir,
             "size_bytes": self.size_bytes,
             "modified_at": self.modified_at.isoformat(),
-            "accessed_at": self.accessed_at.isoformat(),
             "depth": self.depth,
         }
         if self.accessed_at is not None:
@@ -48,7 +46,6 @@ class FileEntry:
             is_dir=bool(data["is_dir"]),
             size_bytes=int(data["size_bytes"]),
             modified_at=datetime.fromisoformat(str(data["modified_at"])),
-            accessed_at=datetime.fromisoformat(str(data["accessed_at"])),
             depth=int(data["depth"]),
             metadata=data.get("metadata") if isinstance(data.get("metadata"), dict) else None,
             accessed_at=accessed_at,
