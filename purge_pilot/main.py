@@ -19,6 +19,9 @@ from .llm_client import PurgeEstimate, estimate_purge_confidence, _SYSTEM_PROMPT
 from .scanner import FileEntry, ScanResult, scan_directory
 
 
+PERMISSION_ERROR_ENTRIES_FILE = "permissionErrorEntries.txt"
+
+
 def _positive_int(value: str) -> int:
     parsed = int(value)
     if parsed < 1:
@@ -569,6 +572,22 @@ def _write_review_commands(command_file: Path, command_sections: list[list[str]]
     return action_count
 
 
+def _write_permission_error_entries(scan_results: list[ScanResult]) -> int:
+    full_paths = sorted(
+        {
+            path
+            for result in scan_results
+            for path in result.permission_error_entries
+        }
+    )
+    if not full_paths:
+        return 0
+
+    output_path = Path(PERMISSION_ERROR_ENTRIES_FILE)
+    output_path.write_text("\n".join(full_paths) + "\n", encoding="utf-8")
+    return len(full_paths)
+
+
 def main(argv: List[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
@@ -750,6 +769,13 @@ def main(argv: List[str] | None = None) -> int:
             _print_text_report(report, threshold=args.threshold)
 
     if args.scan_only:
+        permission_error_count = _write_permission_error_entries(scan_results)
+        if permission_error_count:
+            print(
+                f"Saved {permission_error_count} permission-denied paths to {Path(PERMISSION_ERROR_ENTRIES_FILE).resolve()}",
+                file=sys.stderr,
+            )
+
         if args.save_scan:
             if len(scan_results) != 1:
                 print("ERROR: --save-scan requires exactly one DIR.", file=sys.stderr)

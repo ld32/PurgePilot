@@ -261,6 +261,33 @@ def test_main_scan_subcommand_saves_scan_file(tmp_path, capsys):
     assert "Saved scan JSON" in capsys.readouterr().err
 
 
+def test_main_scan_only_writes_permission_error_entries_file(tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    config_file = tmp_path / "config.md"
+    config_file.write_text("## AI Prompt\n\n```\ntest\n```\n", encoding="utf-8")
+    mocked_scan = MagicMock(
+        entries=[],
+        total_size_bytes=0,
+        permission_error_entries=["/root/blocked", "/root/missing-access.txt"],
+    )
+    mocked_scan.to_dict.return_value = {
+        "root": str(tmp_path),
+        "total_size_bytes": 0,
+        "entry_count": 0,
+        "entries": [],
+        "permission_error_entries": ["/root/blocked", "/root/missing-access.txt"],
+    }
+
+    with patch("purge_pilot.main.scan_directory", return_value=mocked_scan):
+        rc = main(["scan", str(tmp_path), "--output", "json", "--config", str(config_file)])
+
+    assert rc == 0
+    permission_file = tmp_path / "permissionErrorEntries.txt"
+    assert permission_file.exists()
+    assert permission_file.read_text().splitlines() == ["/root/blocked", "/root/missing-access.txt"]
+    assert "permission-denied paths" in capsys.readouterr().err
+
+
 def test_main_query_subcommand_uses_scan_file(tmp_path, capsys):
     scan_file = tmp_path / "scan-subcommand.json"
     scan_file.write_text(

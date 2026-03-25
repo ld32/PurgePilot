@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -205,3 +206,37 @@ def test_scan_with_multiple_processes_matches_single_process(simple_tree):
 def test_scan_rejects_non_positive_process_count(simple_tree):
     with pytest.raises(ValueError):
         scan_directory(simple_tree, processes=0)
+
+
+def test_scan_records_permission_denied_directory(tmp_path):
+    blocked = tmp_path / "blocked"
+    blocked.mkdir()
+
+    original_iterdir = Path.iterdir
+
+    def fake_iterdir(self):
+        if self == blocked:
+            raise PermissionError("denied")
+        return original_iterdir(self)
+
+    with patch("pathlib.Path.iterdir", fake_iterdir):
+        result = scan_directory(tmp_path)
+
+    assert str(blocked.resolve()) in result.permission_error_entries
+
+
+def test_scan_records_permission_denied_child_stat(tmp_path):
+    blocked = tmp_path / "blocked.txt"
+    blocked.write_text("secret")
+
+    original_stat = Path.stat
+
+    def fake_stat(self, *args, **kwargs):
+        if self == blocked:
+            raise PermissionError("denied")
+        return original_stat(self, *args, **kwargs)
+
+    with patch("pathlib.Path.stat", fake_stat):
+        result = scan_directory(tmp_path)
+
+    assert str(blocked.resolve()) in result.permission_error_entries

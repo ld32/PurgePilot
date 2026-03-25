@@ -58,6 +58,7 @@ class ScanResult:
 
     root: str
     entries: List[FileEntry] = field(default_factory=list)
+    permission_error_entries: List[str] = field(default_factory=list)
 
     @property
     def total_size_bytes(self) -> int:
@@ -69,12 +70,18 @@ class ScanResult:
             "total_size_bytes": self.total_size_bytes,
             "entry_count": len(self.entries),
             "entries": [e.to_dict() for e in self.entries],
+            "permission_error_entries": self.permission_error_entries,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "ScanResult":
         entries = [FileEntry.from_dict(item) for item in data.get("entries", [])]
-        return cls(root=str(data["root"]), entries=entries)
+        permission_error_entries = [str(item) for item in data.get("permission_error_entries", [])]
+        return cls(
+            root=str(data["root"]),
+            entries=entries,
+            permission_error_entries=permission_error_entries,
+        )
 
 
 def scan_directory(
@@ -107,18 +114,25 @@ def scan_directory(
     result = ScanResult(root=str(root_path))
 
     if processes == 1:
-        for entry in _walk(root_path, root_path, max_depth=max_depth, include_hidden=include_hidden):
-            result.entries.append(entry)
-        return result
-
-    result.entries.extend(
-        _walk_parallel(
+        entries, permission_error_entries = _walk(
+            root_path,
             root_path,
             max_depth=max_depth,
             include_hidden=include_hidden,
-            processes=processes,
         )
+        result.permission_error_entries.extend(permission_error_entries)
+        for entry in entries:
+            result.entries.append(entry)
+        return result
+
+    entries, permission_error_entries = _walk_parallel(
+        root_path,
+        max_depth=max_depth,
+        include_hidden=include_hidden,
+        processes=processes,
     )
+    result.entries.extend(entries)
+    result.permission_error_entries.extend(permission_error_entries)
 
     return result
 
@@ -129,27 +143,31 @@ def _walk_parallel(
     max_depth: int,
     include_hidden: bool,
     processes: int,
-) -> list[FileEntry]:
+) -> tuple[list[FileEntry], list[str]]:
     try:
         children = list(root_path.iterdir())
     except PermissionError:
-        return []
+        return [], [str(root_path)]
 
     entries: list[FileEntry] = []
+    permission_error_entries: list[str] = []
     subdirs: list[Path] = []
 
-    for child in sorted(children, key=lambda p: (p.is_file(), p.name.lower())):
+    for child in sorted(children, key=lambda p: p.name.lower()):
         if not include_hidden and child.name.startswith("."):
             continue
 
         try:
             stat = child.stat()
-        except (OSError, PermissionError):
+            is_dir = child.is_dir()
+        except PermissionError:
+            permission_error_entries.append(str(child.resolve()))
+            continue
+        except OSError:
             continue
 
         modified_at = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
         accessed_at = datetime.fromtimestamp(stat.st_atime, tz=timezone.utc)
-        is_dir = child.is_dir()
         size = 0 if is_dir else stat.st_size
 
         entries.append(
@@ -167,7 +185,7 @@ def _walk_parallel(
             subdirs.append(child)
 
     if not subdirs:
-        return entries
+        return entries, permission_error_entries
 
     max_workers = min(processes, len(subdirs))
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
@@ -182,22 +200,27 @@ def _walk_parallel(
             for subdir in subdirs
         ]
         for future in futures:
-            entries.extend(future.result())
+            child_entries, child_permission_error_entries = future.result()
+            entries.extend(child_entries)
+            permission_error_entries.extend(child_permission_error_entries)
 
-    return entries
+    return entries, permission_error_entries
 
 
-def _walk_subtree_worker(base_path: str, subtree_path: str, max_depth: int, include_hidden: bool) -> list[FileEntry]:
+def _walk_subtree_worker(
+    base_path: str,
+    subtree_path: str,
+    max_depth: int,
+    include_hidden: bool,
+) -> tuple[list[FileEntry], list[str]]:
     base = Path(base_path)
     subtree = Path(subtree_path)
-    return list(
-        _walk(
-            base,
-            subtree,
-            max_depth=max_depth,
-            include_hidden=include_hidden,
-            depth=1,
-        )
+    return _walk(
+        base,
+        subtree,
+        max_depth=max_depth,
+        include_hidden=include_hidden,
+        depth=1,
     )
 
 
@@ -212,42 +235,52 @@ def _walk(
     max_depth: int,
     include_hidden: bool,
     depth: int = 0,
-) -> Iterator[FileEntry]:
+) -> tuple[list[FileEntry], list[str]]:
     """Yield :class:`FileEntry` objects by walking *current* recursively."""
+    entries: list[FileEntry] = []
+    permission_error_entries: list[str] = []
+
     try:
         children = list(current.iterdir())
     except PermissionError:
-        return
+        return [], [str(current.resolve())]
 
-    for child in sorted(children, key=lambda p: (p.is_file(), p.name.lower())):
+    for child in sorted(children, key=lambda p: p.name.lower()):
         if not include_hidden and child.name.startswith("."):
             continue
 
         try:
             stat = child.stat()
-        except (OSError, PermissionError):
+            is_dir = child.is_dir()
+        except PermissionError:
+            permission_error_entries.append(str(child.resolve()))
+            continue
+        except OSError:
             continue
 
 
         modified_at = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
         accessed_at = datetime.fromtimestamp(stat.st_atime, tz=timezone.utc)
-        is_dir = child.is_dir()
         size = 0 if is_dir else stat.st_size
 
-        yield FileEntry(
+        entries.append(FileEntry(
             path=str(child.relative_to(base)),
             is_dir=is_dir,
             size_bytes=size,
             modified_at=modified_at,
             accessed_at=accessed_at,
             depth=depth,
-        )
+        ))
 
         if is_dir and depth < max_depth:
-            yield from _walk(
+            child_entries, child_permission_error_entries = _walk(
                 base,
                 child,
                 max_depth=max_depth,
                 include_hidden=include_hidden,
                 depth=depth + 1,
             )
+            entries.extend(child_entries)
+            permission_error_entries.extend(child_permission_error_entries)
+
+    return entries, permission_error_entries
