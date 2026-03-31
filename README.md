@@ -5,6 +5,8 @@ Scan a Linux **home directory** on an HPC cluster and use a local or remote
 safely purged — helping you stay within your home quota without accidentally
 deleting something important.
 
+**Fast directory-only scan:** Use the `--folders-only` option to scan and report only directories (folders), skipping all files for much faster results on large trees. By default, PurgePilot scans both files and directories.
+
 ---
 
 ## Why HPC home directories fill up
@@ -184,6 +186,12 @@ purgep scan DIR [DIR ...] [SCAN_OPTIONS]
 purgep query FILE [FILE ...] [QUERY_OPTIONS]
 ```
 
+**Tip:** Add `--folders-only` to `purgep scan` to only scan and report directories (folders), skipping all files for a much faster scan. Example:
+
+```bash
+purgep scan ~ --folders-only --save-scan home_dirs_only.json
+```
+
 The two-step (split) workflow is the default: scan first, query separately.
 This lets you inspect what was found before sending it to an LLM, and reuse
 the same scan with different models or thresholds.
@@ -358,6 +366,7 @@ purgep ~/Downloads --api-url https://api.openai.com/v1 --model gpt-4o
 |---|---|---|
 | `DIR` | *(conditional)* | One or more directories to scan (required unless `--from-scan` is used) |
 | `--scan-only` | *(off)* | Only scan directories and output scan data (skip LLM query) |
+| `--folders-only` | *(off)* | **Only scan and report directories (folders), skipping all files for speed.** |
 | `--save-scan FILE` | *(none)* | Save scan JSON to a file (single directory only) |
 | `--from-scan FILE [FILE ...]` | *(none)* | Load saved scan JSON and run only the LLM query step |
 | `--save-commands FILE` | *(none)* | Write suggested `mv`/`rm` review commands to a shell script; inspect before running |

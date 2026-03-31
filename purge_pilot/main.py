@@ -605,15 +605,15 @@ def main(argv: List[str] | None = None) -> int:
                 folders_only=getattr(args, "folders_only", False),
             )
         except Exception as exc:  # noqa: BLE001
-            print(f"ERROR: Failed to scan {directory}: {exc}", file=sys.stderr)
+            print(f"ERROR: Failed to scan {dir_path}: {exc}", file=sys.stderr)
             exit_code = 1
-            continue
-            if subcommand_args.include_hidden:
-                translated_argv.append("--include-hidden")
-            if subcommand_args.save_scan:
-                translated_argv.extend(["--save-scan", subcommand_args.save_scan])
-            if subcommand_args.verbose:
-                translated_argv.append("--verbose")
+            return exit_code       
+            # if subcommand_args.include_hidden:
+            #     translated_argv.append("--include-hidden")
+            # if subcommand_args.save_scan:
+            #     translated_argv.extend(["--save-scan", subcommand_args.save_scan])
+            # if subcommand_args.verbose:
+            #     translated_argv.append("--verbose")
         else:
             translated_argv = ["--from-scan", *subcommand_args.scan_files]
             translated_argv.extend(["--api-url", subcommand_args.api_url])
