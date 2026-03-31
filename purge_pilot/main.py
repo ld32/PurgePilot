@@ -382,11 +382,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Path to the configuration markdown file (default: config.md).",
     )
     parser.add_argument(
-        "--scan-only",
-        action="store_true",
-        help="Only scan directories and output scan JSON (no LLM query).",
-    )
-    parser.add_argument(
         "--folders-only",
         action="store_true",
         help="Only scan and report directories, not files.",
@@ -395,12 +390,6 @@ def _build_parser() -> argparse.ArgumentParser:
         "--save-scan",
         metavar="FILE",
         help="Write the scan JSON to a file (single directory only).",
-    )
-    parser.add_argument(
-        "--from-scan",
-        nargs="+",
-        metavar="FILE",
-        help="Load one or more scan JSON files and only run the LLM query step.",
     )
     parser.add_argument(
         "--save-commands",
@@ -608,57 +597,8 @@ def main(argv: List[str] | None = None) -> int:
 
     # If only --help is requested, argparse will handle it and exit before this point.
 
-    if args.directories and not args.scan_only and not args.from_scan:
-        # Example: scan mode
-        try:
-            for directory in args.directories:
-                scan_result = scan_directory(
-                    directory,
-                    max_depth=args.max_depth,
-                    include_hidden=args.include_hidden,
-                    processes=args.processes,
-                    folders_only=getattr(args, "folders_only", False),
-                )
-                # ... (rest of scan logic here, if any)
-        except Exception as exc:
-            print(f"ERROR: Failed to scan {directory}: {exc}", file=sys.stderr)
-            exit_code = 1
-            return exit_code
-
-    parser = _build_parser()
-    args = parser.parse_args(argv)
-
-    logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.WARNING,
-        format="%(levelname)s %(name)s: %(message)s",
-    )
-
-    if args.scan_only and args.from_scan:
-        print("ERROR: --scan-only cannot be combined with --from-scan.", file=sys.stderr)
-        return 1
-
-    if args.from_scan and args.directories:
-        print("ERROR: DIR arguments cannot be used with --from-scan.", file=sys.stderr)
-        return 1
-
-    if args.save_scan and args.from_scan:
-        print("ERROR: --save-scan is only valid while scanning directories.", file=sys.stderr)
-        return 1
-
-    if args.scan_only and args.save_commands:
-        print("ERROR: --save-commands requires an LLM query step and cannot be combined with --scan-only.", file=sys.stderr)
-        return 1
-
-    if args.directories and not args.scan_only and not args.from_scan:
-        print(
-            "ERROR: Split workflow is the default. Run `purgep scan ~ --save-scan home_scan.json` "
-            "then `purgep query home_scan.json` in serial.",
-            file=sys.stderr,
-        )
-        return 1
-
-    if not args.from_scan and not args.directories:
-        parser.error("At least one DIR is required unless --from-scan is used.")
+    if not args.directories:
+        parser.error("At least one DIR is required.")
 
     exit_code = 0
     config_path = Path(args.config)
@@ -668,47 +608,6 @@ def main(argv: List[str] | None = None) -> int:
     config = parse_config(config_path)
     system_prompt = config.get("prompt", _SYSTEM_PROMPT)
     command_sections: list[list[str]] = []
-
-    if args.from_scan:
-        for scan_file in args.from_scan:
-            scan_path = Path(scan_file)
-            if not scan_path.exists():
-                print(f"ERROR: Scan file not found: {scan_path}", file=sys.stderr)
-                exit_code = 1
-                continue
-
-            print(f"Loading scan data from {scan_path.resolve()} …", file=sys.stderr)
-            try:
-                full_scan_result = _load_scan_result(scan_path)
-                ai_scan_result = _filter_ai_scan_entries(full_scan_result, config)
-                ai_scan_result = _build_directory_summary_scan(ai_scan_result)
-                report = _query_scan_result(args, ai_scan_result, system_prompt)
-            except Exception as exc:  # noqa: BLE001
-                print(f"ERROR: Failed to query from scan file {scan_file}: {exc}", file=sys.stderr)
-                exit_code = 1
-                continue
-
-            _ensure_rule_based_entries_in_report(report, full_scan_result, config)
-            _apply_config_overrides(report, config)
-            if args.save_commands:
-                command_sections.append(
-                    _build_review_commands(report, full_scan_result, config, threshold=args.threshold)
-                )
-
-            if args.output == "json":
-                print(json.dumps(report.to_dict(), indent=2))
-            else:
-                _print_text_report(report, threshold=args.threshold)
-
-        if args.save_commands:
-            command_file = Path(args.save_commands)
-            action_count = _write_review_commands(command_file, command_sections)
-            print(
-                f"Saved {action_count} review commands to {command_file.resolve()}",
-                file=sys.stderr,
-            )
-
-        return exit_code
 
     scan_results: List[ScanResult] = []
 
@@ -738,9 +637,6 @@ def main(argv: List[str] | None = None) -> int:
 
         scan_results.append(scan_result)
 
-        if args.scan_only:
-            continue
-
         try:
             ai_scan_result = _filter_ai_scan_entries(scan_result, config)
             ai_scan_result = _build_directory_summary_scan(ai_scan_result)
@@ -762,35 +658,7 @@ def main(argv: List[str] | None = None) -> int:
         else:
             _print_text_report(report, threshold=args.threshold)
 
-    if args.scan_only:
-        permission_error_count = _write_permission_error_entries(scan_results)
-        if permission_error_count:
-            print(
-                f"Saved {permission_error_count} permission-denied paths to {Path(PERMISSION_ERROR_ENTRIES_FILE).resolve()}",
-                file=sys.stderr,
-            )
 
-        if args.save_scan:
-            if len(scan_results) != 1:
-                print("ERROR: --save-scan requires exactly one DIR.", file=sys.stderr)
-                return 1
-            out_path = Path(args.save_scan)
-            with open(out_path, "w", encoding="utf-8") as f:
-                json.dump(scan_results[0].to_dict(), f, indent=2)
-            print(f"Saved scan JSON to {out_path.resolve()}", file=sys.stderr)
-
-        if args.output == "json":
-            if len(scan_results) == 1:
-                print(json.dumps(scan_results[0].to_dict(), indent=2))
-            else:
-                print(json.dumps([result.to_dict() for result in scan_results], indent=2))
-        else:
-            for result in scan_results:
-                print(
-                    f"Scan summary for {result.root}: "
-                    f"{len(result.entries)} entries, "
-                    f"{result.total_size_bytes:,} bytes"
-                )
 
     if args.save_commands and command_sections:
         command_file = Path(args.save_commands)
