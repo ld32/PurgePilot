@@ -90,6 +90,7 @@ def scan_directory(
     max_depth: int = 10,
     include_hidden: bool = False,
     processes: int = 1,
+    folders_only: bool = False,
 ) -> ScanResult:
     """Recursively scan *root* and return a :class:`ScanResult`.
 
@@ -119,6 +120,7 @@ def scan_directory(
             root_path,
             max_depth=max_depth,
             include_hidden=include_hidden,
+            folders_only=folders_only,
         )
         result.permission_error_entries.extend(permission_error_entries)
         for entry in entries:
@@ -130,6 +132,7 @@ def scan_directory(
         max_depth=max_depth,
         include_hidden=include_hidden,
         processes=processes,
+        folders_only=folders_only,
     )
     result.entries.extend(entries)
     result.permission_error_entries.extend(permission_error_entries)
@@ -143,6 +146,7 @@ def _walk_parallel(
     max_depth: int,
     include_hidden: bool,
     processes: int,
+    folders_only: bool = False,
 ) -> tuple[list[FileEntry], list[str]]:
     try:
         children = list(root_path.iterdir())
@@ -154,12 +158,14 @@ def _walk_parallel(
     subdirs: list[Path] = []
 
     for child in sorted(children, key=lambda p: p.name.lower()):
-        if not include_hidden and child.name.startswith("."):
+        if not include_hidden and child.name.startswith(":"):
             continue
 
         try:
-            stat = child.stat()
             is_dir = child.is_dir()
+            if folders_only and not is_dir:
+                continue
+            stat = child.stat()
         except PermissionError:
             permission_error_entries.append(str(child.resolve()))
             continue
@@ -235,6 +241,7 @@ def _walk(
     max_depth: int,
     include_hidden: bool,
     depth: int = 0,
+    folders_only: bool = False,
 ) -> tuple[list[FileEntry], list[str]]:
     """Yield :class:`FileEntry` objects by walking *current* recursively."""
     entries: list[FileEntry] = []
@@ -246,18 +253,19 @@ def _walk(
         return [], [str(current.resolve())]
 
     for child in sorted(children, key=lambda p: p.name.lower()):
-        if not include_hidden and child.name.startswith("."):
+        if not include_hidden and child.name.startswith(":"):
             continue
 
         try:
-            stat = child.stat()
             is_dir = child.is_dir()
+            if folders_only and not is_dir:
+                continue
+            stat = child.stat()
         except PermissionError:
             permission_error_entries.append(str(child.resolve()))
             continue
         except OSError:
             continue
-
 
         modified_at = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
         accessed_at = datetime.fromtimestamp(stat.st_atime, tz=timezone.utc)
@@ -279,6 +287,7 @@ def _walk(
                 max_depth=max_depth,
                 include_hidden=include_hidden,
                 depth=depth + 1,
+                folders_only=folders_only,
             )
             entries.extend(child_entries)
             permission_error_entries.extend(child_permission_error_entries)

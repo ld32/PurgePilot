@@ -387,6 +387,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Only scan directories and output scan JSON (no LLM query).",
     )
     parser.add_argument(
+        "--folders-only",
+        action="store_true",
+        help="Only scan and report directories, not files.",
+    )
+    parser.add_argument(
         "--save-scan",
         metavar="FILE",
         help="Write the scan JSON to a file (single directory only).",
@@ -591,20 +596,18 @@ def _write_permission_error_entries(scan_results: list[ScanResult]) -> int:
 def main(argv: List[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
-
-    if argv and argv[0] in {"scan", "query"}:
-        subcommand_parser = _build_subcommand_parser()
-        subcommand_args = subcommand_parser.parse_args(argv)
-
-        translated_argv: List[str]
-        if subcommand_args.command == "scan":
-            translated_argv = [*subcommand_args.directories, "--scan-only"]
-            translated_argv.extend(["--max-depth", str(subcommand_args.max_depth)])
-            translated_argv.extend(["--processes", str(subcommand_args.processes)])
-            translated_argv.extend(["--output", subcommand_args.output])
-            translated_argv.extend(["--config", subcommand_args.config])
-            if subcommand_args.save_commands:
-                translated_argv.extend(["--save-commands", subcommand_args.save_commands])
+        try:
+            scan_result = scan_directory(
+                dir_path,
+                max_depth=args.max_depth,
+                include_hidden=args.include_hidden,
+                processes=args.processes,
+                folders_only=getattr(args, "folders_only", False),
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"ERROR: Failed to scan {directory}: {exc}", file=sys.stderr)
+            exit_code = 1
+            continue
             if subcommand_args.include_hidden:
                 translated_argv.append("--include-hidden")
             if subcommand_args.save_scan:
