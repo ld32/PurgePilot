@@ -424,6 +424,7 @@ def _build_subcommand_parser() -> argparse.ArgumentParser:
     scan_parser.add_argument("--save-scan", metavar="FILE")
     scan_parser.add_argument("--save-commands", metavar="FILE")
     scan_parser.add_argument("--config", default="config.md")
+    scan_parser.add_argument("--folders-only", action="store_true", help="Only scan and report directories, not files.")
     scan_parser.add_argument("-v", "--verbose", action="store_true")
 
     query_parser = subparsers.add_parser(
@@ -431,7 +432,7 @@ def _build_subcommand_parser() -> argparse.ArgumentParser:
         help="Query the LLM using one or more saved scan JSON files.",
     )
     query_parser.add_argument("scan_files", metavar="FILE", nargs="+")
-    query_parser.add_argument(
+    query_parser.add_argument( 
         "--api-url",
         default=os.environ.get("PURGE_PILOT_API_URL", "http://localhost:11434/v1"),
     )
