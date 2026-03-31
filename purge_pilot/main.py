@@ -594,45 +594,36 @@ def _write_permission_error_entries(scan_results: list[ScanResult]) -> int:
 
 
 def main(argv: List[str] | None = None) -> int:
+
     if argv is None:
         argv = sys.argv[1:]
+
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.WARNING,
+        format="%(levelname)s %(name)s: %(message)s",
+    )
+
+    # If only --help is requested, argparse will handle it and exit before this point.
+
+    if args.directories and not args.scan_only and not args.from_scan:
+        # Example: scan mode
         try:
-            scan_result = scan_directory(
-                dir_path,
-                max_depth=args.max_depth,
-                include_hidden=args.include_hidden,
-                processes=args.processes,
-                folders_only=getattr(args, "folders_only", False),
-            )
-        except Exception as exc:  # noqa: BLE001
+            for directory in args.directories:
+                scan_result = scan_directory(
+                    directory,
+                    max_depth=args.max_depth,
+                    include_hidden=args.include_hidden,
+                    processes=args.processes,
+                    folders_only=getattr(args, "folders_only", False),
+                )
+                # ... (rest of scan logic here, if any)
+        except Exception as exc:
             print(f"ERROR: Failed to scan {directory}: {exc}", file=sys.stderr)
             exit_code = 1
-            return exit_code  
-        else:   
-            if subcommand_args.include_hidden:
-                translated_argv.append("--include-hidden")
-            if subcommand_args.save_scan:
-                translated_argv.extend(["--save-scan", subcommand_args.save_scan])
-            if subcommand_args.verbose:
-                translated_argv.append("--verbose")
-            translated_argv = ["--from-scan", *subcommand_args.scan_files]
-            translated_argv.extend(["--api-url", subcommand_args.api_url])
-            translated_argv.extend(["--model", subcommand_args.model])
-            translated_argv.extend(["--threshold", str(subcommand_args.threshold)])
-            translated_argv.extend(["--output", subcommand_args.output])
-            translated_argv.extend(["--timeout", str(subcommand_args.timeout)])
-            translated_argv.extend(["--batch-size", str(subcommand_args.batch_size)])
-            if subcommand_args.num_ctx is not None:
-                translated_argv.extend(["--num-ctx", str(subcommand_args.num_ctx)])
-            translated_argv.extend(["--config", subcommand_args.config])
-            if subcommand_args.save_commands:
-                translated_argv.extend(["--save-commands", subcommand_args.save_commands])
-            if subcommand_args.api_key:
-                translated_argv.extend(["--api-key", subcommand_args.api_key])
-            if subcommand_args.verbose:
-                translated_argv.append("--verbose")
-
-        argv = translated_argv
+            return exit_code
 
     parser = _build_parser()
     args = parser.parse_args(argv)
