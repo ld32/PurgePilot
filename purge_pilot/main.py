@@ -587,6 +587,115 @@ def main(argv: List[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
 
+    # Dispatch to subcommand parser if first arg is 'scan' or 'query'
+    if argv and argv[0] in {"scan", "query"}:
+        parser = _build_subcommand_parser()
+        args = parser.parse_args(argv)
+        logging.basicConfig(
+            level=logging.DEBUG if getattr(args, "verbose", False) else logging.WARNING,
+            format="%(levelname)s %(name)s: %(message)s",
+        )
+        if args.command == "scan":
+            exit_code = 0
+            config_path = Path(args.config)
+            if not config_path.exists():
+                print(f"ERROR: Config file not found: {config_path}", file=sys.stderr)
+                return 1
+            config = parse_config(config_path)
+            command_sections: list[list[str]] = []
+            scan_results: List[ScanResult] = []
+            for directory in args.directories:
+                dir_path = Path(directory)
+                if not dir_path.exists():
+                    print(f"ERROR: Directory not found: {directory}", file=sys.stderr)
+                    exit_code = 1
+                    continue
+                if not dir_path.is_dir():
+                    print(f"ERROR: Not a directory: {directory}", file=sys.stderr)
+                    exit_code = 1
+                    continue
+                print(f"Scanning {dir_path.resolve()} …", file=sys.stderr)
+                try:
+                    scan_result = scan_directory(
+                        dir_path,
+                        max_depth=args.max_depth,
+                        include_hidden=args.include_hidden,
+                        processes=args.processes,
+                    )
+                except Exception as exc:
+                    print(f"ERROR: Failed to scan {directory}: {exc}", file=sys.stderr)
+                    exit_code = 1
+                    continue
+                scan_results.append(scan_result)
+                # Optionally save scan
+                if args.save_scan:
+                    if len(args.directories) > 1:
+                        print("ERROR: --save-scan only supports a single directory.", file=sys.stderr)
+                        exit_code = 1
+                    else:
+                        with open(args.save_scan, "w", encoding="utf-8") as f:
+                            f.write(json.dumps(scan_result.to_dict(), indent=2))
+                        print(f"Saved scan to {Path(args.save_scan).resolve()}", file=sys.stderr)
+                # Optionally print scan summary
+                if args.output == "json":
+                    print(json.dumps(scan_result.to_dict(), indent=2))
+                else:
+                    print(f"Scanned {directory}: {len(scan_result.entries)} entries")
+            if args.save_commands and scan_results:
+                command_file = Path(args.save_commands)
+                action_count = _write_review_commands(command_file, command_sections)
+                print(
+                    f"Saved {action_count} review commands to {command_file.resolve()}",
+                    file=sys.stderr,
+                )
+            return exit_code
+        elif args.command == "query":
+            exit_code = 0
+            config_path = Path(args.config)
+            if not config_path.exists():
+                print(f"ERROR: Config file not found: {config_path}", file=sys.stderr)
+                return 1
+            config = parse_config(config_path)
+            system_prompt = config.get("prompt", _SYSTEM_PROMPT)
+            command_sections: list[list[str]] = []
+            for scan_file in args.scan_files:
+                scan_path = Path(scan_file)
+                if not scan_path.exists():
+                    print(f"ERROR: Scan file not found: {scan_file}", file=sys.stderr)
+                    exit_code = 1
+                    continue
+                scan_result = _load_scan_result(scan_path)
+                try:
+                    ai_scan_result = _filter_ai_scan_entries(scan_result, config)
+                    ai_scan_result = _build_directory_summary_scan(ai_scan_result)
+                    report = _query_scan_result(args, ai_scan_result, system_prompt)
+                except Exception as exc:
+                    print(f"ERROR: LLM request failed for {scan_file}: {exc}", file=sys.stderr)
+                    exit_code = 1
+                    continue
+                _ensure_rule_based_entries_in_report(report, scan_result, config)
+                _apply_config_overrides(report, config)
+                if args.save_commands:
+                    command_sections.append(
+                        _build_review_commands(report, scan_result, config, threshold=args.threshold)
+                    )
+                if args.output == "json":
+                    print(json.dumps(report.to_dict(), indent=2))
+                else:
+                    _print_text_report(report, threshold=args.threshold)
+            if args.save_commands and command_sections:
+                command_file = Path(args.save_commands)
+                action_count = _write_review_commands(command_file, command_sections)
+                print(
+                    f"Saved {action_count} review commands to {command_file.resolve()}",
+                    file=sys.stderr,
+                )
+            return exit_code
+        else:
+            print(f"Unknown subcommand: {args.command}", file=sys.stderr)
+            return 2
+
+    # Default: legacy parser (no subcommand)
     parser = _build_parser()
     args = parser.parse_args(argv)
 
