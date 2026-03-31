@@ -627,12 +627,13 @@ def main(argv: List[str] | None = None) -> int:
                 except Exception as exc:
                     print(f"ERROR: Failed to scan {directory}: {exc}", file=sys.stderr)
                     exit_code = 1
-                    continue
+                    continue 
+                
                 # If --folders-only, filter out files from entries (defensive, in case scanner missed any)
                 if getattr(args, "folders_only", False):
                     scan_result.entries = [e for e in scan_result.entries if getattr(e, "is_dir", False)]
                 scan_results.append(scan_result)
-                # Optionally save scan
+                # Optionally save scan 
                 if args.save_scan:
                     if len(args.directories) > 1:
                         print("ERROR: --save-scan only supports a single directory.", file=sys.stderr)
