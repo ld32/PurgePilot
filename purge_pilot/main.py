@@ -190,7 +190,7 @@ def _build_directory_summary_scan(scan_result: ScanResult) -> ScanResult:
                     stats["most_recent_access"] = accessed_at
             stats["extensions"][suffix] += 1
 
-    summary_entries = []
+    summary_entries = [] 
     for path, stats in by_path.items():
         ext_counter = stats["extensions"]
         top_extensions = [
