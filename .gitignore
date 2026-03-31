@@ -1,4 +1,7 @@
 home_scan*
+*.log
+log
+testdata
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
