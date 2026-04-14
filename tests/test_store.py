@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from purge_pilot.scanner import FileEntry, ScanResult
-from purge_pilot.store import load_from_sqlite, save_to_sqlite
+from purge_pilot.store import load_from_sqlite, save_to_sqlite, upsert_scan_result
 
 
 # ---------------------------------------------------------------------------
@@ -192,3 +192,108 @@ def test_load_is_readonly(tmp_path):
     with pytest.raises(sqlite3.OperationalError):
         conn.execute("INSERT INTO files VALUES ('x', 0, 0, '2024-01-01', NULL, 0)")
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# upsert_scan_result tests
+# ---------------------------------------------------------------------------
+
+def _entry(path: str, size: int = 100, ts: datetime | None = None, is_dir: bool = False, depth: int = 0) -> FileEntry:
+    return FileEntry(
+        path=path,
+        is_dir=is_dir,
+        size_bytes=size,
+        modified_at=ts or datetime(2024, 1, 1, tzinfo=timezone.utc),
+        accessed_at=None,
+        depth=depth,
+    )
+
+
+def test_upsert_creates_db_on_first_call(tmp_path):
+    db = tmp_path / "scan.db"
+    upsert_scan_result(ScanResult(root="/r", entries=[_entry("a.txt")]), db)
+    assert db.exists()
+
+
+def test_upsert_skips_unchanged_entry(tmp_path):
+    db = tmp_path / "scan.db"
+    entry = _entry("a.txt", size=512)
+    save_to_sqlite(ScanResult(root="/r", entries=[entry]), db)
+
+    # Re-run upsert with the identical entry
+    upsert_scan_result(ScanResult(root="/r", entries=[entry]), db)
+
+    conn = sqlite3.connect(str(db))
+    rows = conn.execute("SELECT size_bytes FROM files WHERE path='a.txt'").fetchall()
+    conn.close()
+    # Still exactly one row with the original size
+    assert len(rows) == 1
+    assert rows[0][0] == 512
+
+
+def test_upsert_updates_changed_entry(tmp_path):
+    db = tmp_path / "scan.db"
+    original = _entry("b.txt", size=100, ts=datetime(2024, 1, 1, tzinfo=timezone.utc))
+    save_to_sqlite(ScanResult(root="/r", entries=[original]), db)
+
+    updated = _entry("b.txt", size=999, ts=datetime(2024, 6, 1, tzinfo=timezone.utc))
+    upsert_scan_result(ScanResult(root="/r", entries=[updated]), db)
+
+    conn = sqlite3.connect(str(db))
+    row = conn.execute("SELECT size_bytes, modified_at FROM files WHERE path='b.txt'").fetchone()
+    conn.close()
+    assert row[0] == 999
+    assert "2024-06-01" in row[1]
+
+
+def test_upsert_inserts_new_entry(tmp_path):
+    db = tmp_path / "scan.db"
+    save_to_sqlite(ScanResult(root="/r", entries=[_entry("old.txt")]), db)
+
+    upsert_scan_result(ScanResult(root="/r", entries=[_entry("old.txt"), _entry("new.txt")]), db)
+
+    conn = sqlite3.connect(str(db))
+    count = conn.execute("SELECT COUNT(*) FROM files").fetchone()[0]
+    conn.close()
+    assert count == 2
+
+
+def test_upsert_removes_deleted_entry_by_default(tmp_path):
+    db = tmp_path / "scan.db"
+    save_to_sqlite(ScanResult(root="/r", entries=[_entry("gone.txt"), _entry("stay.txt")]), db)
+
+    # Re-scan without "gone.txt"
+    upsert_scan_result(ScanResult(root="/r", entries=[_entry("stay.txt")]), db)
+
+    conn = sqlite3.connect(str(db))
+    paths = {r[0] for r in conn.execute("SELECT path FROM files").fetchall()}
+    conn.close()
+    assert paths == {"stay.txt"}
+
+
+def test_upsert_keeps_deleted_entry_when_remove_deleted_false(tmp_path):
+    db = tmp_path / "scan.db"
+    save_to_sqlite(ScanResult(root="/r", entries=[_entry("keep.txt"), _entry("also.txt")]), db)
+
+    # Re-scan without "keep.txt", but don't remove deleted
+    upsert_scan_result(
+        ScanResult(root="/r", entries=[_entry("also.txt")]),
+        db,
+        remove_deleted=False,
+    )
+
+    conn = sqlite3.connect(str(db))
+    count = conn.execute("SELECT COUNT(*) FROM files").fetchone()[0]
+    conn.close()
+    assert count == 2
+
+
+def test_upsert_updates_meta_root(tmp_path):
+    db = tmp_path / "scan.db"
+    save_to_sqlite(ScanResult(root="/old/root", entries=[]), db)
+    upsert_scan_result(ScanResult(root="/new/root", entries=[]), db)
+
+    conn = sqlite3.connect(str(db))
+    root = conn.execute("SELECT value FROM meta WHERE key='root'").fetchone()[0]
+    conn.close()
+    assert root == "/new/root"

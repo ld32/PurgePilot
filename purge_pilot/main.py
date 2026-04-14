@@ -18,7 +18,7 @@ from typing import List
 from .llm_client import PurgeEstimate, estimate_purge_confidence, _SYSTEM_PROMPT
 from .llm_sql_client import estimate_purge_confidence_sql
 from .scanner import FileEntry, ScanResult, scan_directory
-from .store import load_from_sqlite, save_to_sqlite
+from .store import load_from_sqlite, save_to_sqlite, upsert_scan_result
 
 
 PERMISSION_ERROR_ENTRIES_FILE = "permissionErrorEntries.txt"
@@ -426,6 +426,15 @@ def _build_subcommand_parser() -> argparse.ArgumentParser:
     scan_parser.add_argument("--save-scan", metavar="FILE")
     scan_parser.add_argument("--save-db", metavar="FILE",
                              help="Save scan data to a SQLite database file.")
+    scan_parser.add_argument(
+        "--incremental",
+        action="store_true",
+        help=(
+            "When saving to a database with --save-db, skip unchanged entries, "
+            "update changed ones, insert new ones, and remove deleted ones "
+            "instead of replacing all data."
+        ),
+    )
     scan_parser.add_argument("--save-commands", metavar="FILE")
     scan_parser.add_argument("--config", default="config.md")
     scan_parser.add_argument("--folders-only", action="store_true", help="Only scan and report directories, not files.")
@@ -684,7 +693,10 @@ def main(argv: List[str] | None = None) -> int:
                         print("ERROR: --save-db only supports a single directory.", file=sys.stderr)
                         exit_code = 1
                     else:
-                        save_to_sqlite(scan_result, args.save_db)
+                        if getattr(args, "incremental", False):
+                            upsert_scan_result(scan_result, args.save_db)
+                        else:
+                            save_to_sqlite(scan_result, args.save_db)
                         print(f"Saved scan database to {Path(args.save_db).resolve()}", file=sys.stderr)
                 # Optionally print scan summary
                 if args.output == "json":

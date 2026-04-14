@@ -72,6 +72,99 @@ def save_to_sqlite(scan_result: ScanResult, db_path: str | Path) -> None:
         conn.close()
 
 
+def upsert_scan_result(
+    scan_result: ScanResult,
+    db_path: str | Path,
+    *,
+    remove_deleted: bool = True,
+) -> None:
+    """Incrementally update a SQLite database with *scan_result*.
+
+    Compared to :func:`save_to_sqlite` this function:
+
+    * **Skips** entries whose ``path``, ``size_bytes``, and ``modified_at``
+      are identical to what is already stored.
+    * **Updates** entries whose ``size_bytes`` or ``modified_at`` changed.
+    * **Inserts** entries that are not yet in the database.
+    * **Deletes** entries that are in the database but absent from the new
+      scan when *remove_deleted* is ``True`` (the default).
+
+    The ``meta.root`` value is always updated to ``scan_result.root``.
+    """
+    db_path = Path(db_path)
+    conn = sqlite3.connect(str(db_path))
+    try:
+        cur = conn.cursor()
+        cur.executescript(_CREATE_FILES_TABLE + _CREATE_META_TABLE)
+
+        # Load existing rows: path -> (size_bytes, modified_at_iso)
+        cur.execute("SELECT path, size_bytes, modified_at FROM files")
+        existing: dict[str, tuple[int, str]] = {
+            row[0]: (row[1], row[2]) for row in cur.fetchall()
+        }
+
+        new_paths: set[str] = set()
+        to_insert: list[tuple] = []
+        to_update: list[tuple] = []
+
+        for entry in scan_result.entries:
+            new_paths.add(entry.path)
+            modified_iso = entry.modified_at.isoformat()
+            accessed_iso = entry.accessed_at.isoformat() if entry.accessed_at is not None else None
+
+            if entry.path not in existing:
+                to_insert.append((
+                    entry.path,
+                    int(entry.is_dir),
+                    entry.size_bytes,
+                    modified_iso,
+                    accessed_iso,
+                    entry.depth,
+                ))
+            else:
+                stored_size, stored_modified = existing[entry.path]
+                if stored_size != entry.size_bytes or stored_modified != modified_iso:
+                    to_update.append((
+                        int(entry.is_dir),
+                        entry.size_bytes,
+                        modified_iso,
+                        accessed_iso,
+                        entry.depth,
+                        entry.path,
+                    ))
+                # else: unchanged — skip
+
+        if to_insert:
+            cur.executemany(
+                "INSERT INTO files (path, is_dir, size_bytes, modified_at, accessed_at, depth)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                to_insert,
+            )
+
+        if to_update:
+            cur.executemany(
+                "UPDATE files SET is_dir=?, size_bytes=?, modified_at=?, accessed_at=?, depth=?"
+                " WHERE path=?",
+                to_update,
+            )
+
+        if remove_deleted:
+            deleted_paths = set(existing.keys()) - new_paths
+            if deleted_paths:
+                cur.executemany(
+                    "DELETE FROM files WHERE path=?",
+                    [(p,) for p in deleted_paths],
+                )
+
+        cur.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+            ("root", scan_result.root),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def load_from_sqlite(db_path: str | Path) -> ScanResult:
     """Load a :class:`~purge_pilot.scanner.ScanResult` from a SQLite database.
 
