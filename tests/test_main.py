@@ -633,3 +633,149 @@ def test_main_query_directory_summary_keeps_root_level_files(tmp_path):
     assert rc == 0
     ai_scan = mock_estimate.call_args[0][0]
     assert [entry.path for entry in ai_scan.entries] == ["root.log"]
+
+
+# ---------------------------------------------------------------------------
+# sqlquery subcommand tests
+# ---------------------------------------------------------------------------
+
+
+def test_scan_save_db_creates_sqlite_file(tmp_path, capsys):
+    from purge_pilot.scanner import ScanResult
+
+    db_file = tmp_path / "scan.db"
+    real_scan = ScanResult(root=str(tmp_path), entries=[])
+
+    with patch("purge_pilot.main.scan_directory", return_value=real_scan):
+        rc = main(["scan", str(tmp_path), "--save-db", str(db_file)])
+
+    assert rc == 0
+    assert db_file.exists()
+    assert "scan database" in capsys.readouterr().err
+
+
+def test_sqlquery_success(tmp_path, capsys):
+    from datetime import datetime, timezone
+    from purge_pilot.scanner import FileEntry, ScanResult
+    from purge_pilot.store import save_to_sqlite
+
+    db_file = tmp_path / "scan.db"
+    scan_result = ScanResult(
+        root=str(tmp_path),
+        entries=[
+            FileEntry(
+                path=".cache/pip",
+                is_dir=True,
+                size_bytes=0,
+                modified_at=datetime(2022, 1, 1, tzinfo=timezone.utc),
+                depth=1,
+            )
+        ],
+    )
+    save_to_sqlite(scan_result, db_file)
+
+    report = PurgeReport(
+        root=str(tmp_path),
+        estimates=[
+            PurgeEstimate(path=".cache/pip", confidence=0.9, reason="pip cache")
+        ],
+    )
+
+    with patch("purge_pilot.main.estimate_purge_confidence_sql", return_value=report):
+        rc = main(["sqlquery", str(db_file), "--api-url", "http://localhost/v1", "--model", "llama3"])
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert ".cache/pip" in out
+
+
+def test_sqlquery_json_output(tmp_path, capsys):
+    from datetime import datetime, timezone
+    from purge_pilot.scanner import FileEntry, ScanResult
+    from purge_pilot.store import save_to_sqlite
+
+    db_file = tmp_path / "scan.db"
+    save_to_sqlite(ScanResult(root=str(tmp_path), entries=[]), db_file)
+
+    report = PurgeReport(
+        root=str(tmp_path),
+        estimates=[
+            PurgeEstimate(path="old.tar.gz", confidence=0.85, reason="archive")
+        ],
+    )
+
+    with patch("purge_pilot.main.estimate_purge_confidence_sql", return_value=report):
+        rc = main([
+            "sqlquery", str(db_file),
+            "--api-url", "http://localhost/v1",
+            "--model", "llama3",
+            "--output", "json",
+        ])
+
+    assert rc == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["root"] == str(tmp_path)
+    assert len(data["estimates"]) == 1
+
+
+def test_sqlquery_nonexistent_db(tmp_path, capsys):
+    rc = main(["sqlquery", str(tmp_path / "missing.db"), "--api-url", "http://x/v1", "--model", "m"])
+    assert rc == 1
+    assert "not found" in capsys.readouterr().err.lower()
+
+
+def test_sqlquery_llm_error(tmp_path, capsys):
+    from purge_pilot.store import save_to_sqlite
+    from purge_pilot.scanner import ScanResult
+
+    db_file = tmp_path / "scan.db"
+    save_to_sqlite(ScanResult(root=str(tmp_path), entries=[]), db_file)
+
+    with patch("purge_pilot.main.estimate_purge_confidence_sql", side_effect=RuntimeError("timeout")):
+        rc = main(["sqlquery", str(db_file), "--api-url", "http://bad/v1", "--model", "x"])
+
+    assert rc == 1
+    assert "timeout" in capsys.readouterr().err.lower()
+
+
+def test_sqlquery_saves_commands(tmp_path, capsys):
+    from datetime import datetime, timezone
+    from purge_pilot.scanner import FileEntry, ScanResult
+    from purge_pilot.store import save_to_sqlite
+
+    db_file = tmp_path / "scan.db"
+    commands_file = tmp_path / "review.sh"
+    save_to_sqlite(
+        ScanResult(
+            root=str(tmp_path),
+            entries=[
+                FileEntry(
+                    path="old.tar.gz",
+                    is_dir=False,
+                    size_bytes=100,
+                    modified_at=datetime(2022, 1, 1, tzinfo=timezone.utc),
+                    depth=0,
+                )
+            ],
+        ),
+        db_file,
+    )
+
+    report = PurgeReport(
+        root=str(tmp_path),
+        estimates=[PurgeEstimate(path="old.tar.gz", confidence=0.9, reason="archive")],
+    )
+
+    with patch("purge_pilot.main.estimate_purge_confidence_sql", return_value=report):
+        rc = main([
+            "sqlquery", str(db_file),
+            "--api-url", "http://localhost/v1",
+            "--model", "llama3",
+            "--save-commands", str(commands_file),
+        ])
+
+    assert rc == 0
+    assert commands_file.exists()
+    script = commands_file.read_text()
+    assert "old.tar.gz" in script
+

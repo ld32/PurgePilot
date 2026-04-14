@@ -16,7 +16,9 @@ from pathlib import Path
 from typing import List
 
 from .llm_client import PurgeEstimate, estimate_purge_confidence, _SYSTEM_PROMPT
+from .llm_sql_client import estimate_purge_confidence_sql
 from .scanner import FileEntry, ScanResult, scan_directory
+from .store import load_from_sqlite, save_to_sqlite
 
 
 PERMISSION_ERROR_ENTRIES_FILE = "permissionErrorEntries.txt"
@@ -422,6 +424,8 @@ def _build_subcommand_parser() -> argparse.ArgumentParser:
     scan_parser.add_argument("--include-hidden", action="store_true")
     scan_parser.add_argument("--output", choices=["text", "json"], default="text")
     scan_parser.add_argument("--save-scan", metavar="FILE")
+    scan_parser.add_argument("--save-db", metavar="FILE",
+                             help="Save scan data to a SQLite database file.")
     scan_parser.add_argument("--save-commands", metavar="FILE")
     scan_parser.add_argument("--config", default="config.md")
     scan_parser.add_argument("--folders-only", action="store_true", help="Only scan and report directories, not files.")
@@ -452,6 +456,39 @@ def _build_subcommand_parser() -> argparse.ArgumentParser:
     query_parser.add_argument("--save-commands", metavar="FILE")
     query_parser.add_argument("--config", default="config.md")
     query_parser.add_argument("-v", "--verbose", action="store_true")
+
+    sqlquery_parser = subparsers.add_parser(
+        "sqlquery",
+        help=(
+            "Query the LLM using a SQLite database produced by 'purgep scan --save-db'. "
+            "The LLM generates SQL SELECT queries instead of receiving the full file list, "
+            "which drastically reduces token usage for large scans."
+        ),
+    )
+    sqlquery_parser.add_argument(
+        "db_file",
+        metavar="DB",
+        help="SQLite database file produced by 'purgep scan --save-db'.",
+    )
+    sqlquery_parser.add_argument(
+        "--api-url",
+        default=os.environ.get("PURGE_PILOT_API_URL", "http://localhost:11434/v1"),
+    )
+    sqlquery_parser.add_argument(
+        "--model",
+        default=os.environ.get("PURGE_PILOT_MODEL", "llama3"),
+    )
+    sqlquery_parser.add_argument(
+        "--api-key",
+        default=os.environ.get("PURGE_PILOT_API_KEY"),
+    )
+    sqlquery_parser.add_argument("--threshold", type=float, default=0.7, metavar="FLOAT")
+    sqlquery_parser.add_argument("--output", choices=["text", "json"], default="text")
+    sqlquery_parser.add_argument("--timeout", type=int, default=120, metavar="SECONDS")
+    sqlquery_parser.add_argument("--num-ctx", type=_positive_int, default=None, metavar="INT")
+    sqlquery_parser.add_argument("--save-commands", metavar="FILE")
+    sqlquery_parser.add_argument("--config", default="config.md")
+    sqlquery_parser.add_argument("-v", "--verbose", action="store_true")
 
     return parser
 
@@ -589,7 +626,7 @@ def main(argv: List[str] | None = None) -> int:
         argv = sys.argv[1:]
 
     # Dispatch to subcommand parser if first arg is 'scan' or 'query'
-    if argv and argv[0] in {"scan", "query"}:
+    if argv and argv[0] in {"scan", "query", "sqlquery"}:
         parser = _build_subcommand_parser()
         args = parser.parse_args(argv)
         logging.basicConfig(
@@ -641,6 +678,14 @@ def main(argv: List[str] | None = None) -> int:
                         with open(args.save_scan, "w", encoding="utf-8") as f:
                             f.write(json.dumps(scan_result.to_dict(), indent=2))
                         print(f"Saved scan to {Path(args.save_scan).resolve()}", file=sys.stderr)
+                # Optionally save to SQLite
+                if getattr(args, "save_db", None):
+                    if len(args.directories) > 1:
+                        print("ERROR: --save-db only supports a single directory.", file=sys.stderr)
+                        exit_code = 1
+                    else:
+                        save_to_sqlite(scan_result, args.save_db)
+                        print(f"Saved scan database to {Path(args.save_db).resolve()}", file=sys.stderr)
                 # Optionally print scan summary
                 if args.output == "json":
                     print(json.dumps(scan_result.to_dict(), indent=2))
@@ -695,6 +740,58 @@ def main(argv: List[str] | None = None) -> int:
                     f"Saved {action_count} review commands to {command_file.resolve()}",
                     file=sys.stderr,
                 )
+            return exit_code
+        elif args.command == "sqlquery":
+            exit_code = 0
+            config_path = Path(args.config)
+            if not config_path.exists():
+                print(f"ERROR: Config file not found: {config_path}", file=sys.stderr)
+                return 1
+            config = parse_config(config_path)
+
+            db_path = Path(args.db_file)
+            if not db_path.exists():
+                print(f"ERROR: Database file not found: {db_path}", file=sys.stderr)
+                return 1
+
+            try:
+                scan_result = load_from_sqlite(db_path)
+                print(
+                    f"  Loaded {len(scan_result.entries)} entries from {db_path}. "
+                    "Querying LLM (SQL mode) …",
+                    file=sys.stderr,
+                )
+                report = estimate_purge_confidence_sql(
+                    db_path,
+                    api_url=args.api_url,
+                    model=args.model,
+                    api_key=args.api_key,
+                    timeout=args.timeout,
+                    num_ctx=getattr(args, "num_ctx", None),
+                )
+            except Exception as exc:
+                print(f"ERROR: SQL query mode failed: {exc}", file=sys.stderr)
+                return 1
+
+            _ensure_rule_based_entries_in_report(report, scan_result, config)
+            _apply_config_overrides(report, config)
+
+            if args.save_commands:
+                command_sections: list[list[str]] = [
+                    _build_review_commands(report, scan_result, config, threshold=args.threshold)
+                ]
+                command_file = Path(args.save_commands)
+                action_count = _write_review_commands(command_file, command_sections)
+                print(
+                    f"Saved {action_count} review commands to {command_file.resolve()}",
+                    file=sys.stderr,
+                )
+
+            if args.output == "json":
+                print(json.dumps(report.to_dict(), indent=2))
+            else:
+                _print_text_report(report, threshold=args.threshold)
+
             return exit_code
         else:
             print(f"Unknown subcommand: {args.command}", file=sys.stderr)
