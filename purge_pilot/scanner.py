@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -149,16 +149,18 @@ def _walk_parallel(
     folders_only: bool = False,
 ) -> tuple[list[FileEntry], list[str]]:
     try:
-        children = list(root_path.iterdir())
+        with os.scandir(root_path) as it:
+            children = list(it)
     except PermissionError:
         return [], [str(root_path)]
 
     entries: list[FileEntry] = []
     permission_error_entries: list[str] = []
     subdirs: list[Path] = []
+    base_str = str(root_path)
 
-    for child in sorted(children, key=lambda p: p.name.lower()):
-        if not include_hidden and child.name.startswith(":"):
+    for child in children:
+        if not include_hidden and child.name.startswith("."):
             continue
 
         try:
@@ -167,7 +169,7 @@ def _walk_parallel(
                 continue
             stat = child.stat()
         except PermissionError:
-            permission_error_entries.append(str(child.resolve()))
+            permission_error_entries.append(os.path.realpath(child.path))
             continue
         except OSError:
             continue
@@ -178,7 +180,7 @@ def _walk_parallel(
 
         entries.append(
             FileEntry(
-                path=str(child.relative_to(root_path)),
+                path=os.path.relpath(child.path, base_str),
                 is_dir=is_dir,
                 size_bytes=size,
                 modified_at=modified_at,
@@ -188,20 +190,22 @@ def _walk_parallel(
         )
 
         if is_dir and max_depth > 0:
-            subdirs.append(child)
+            subdirs.append(Path(child.path))
 
     if not subdirs:
         return entries, permission_error_entries
 
     max_workers = min(processes, len(subdirs))
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [
             executor.submit(
-                _walk_subtree_worker,
-                str(root_path),
-                str(subdir),
-                max_depth,
-                include_hidden,
+                _walk,
+                root_path,
+                subdir,
+                max_depth=max_depth,
+                include_hidden=include_hidden,
+                depth=1,
+                folders_only=folders_only,
             )
             for subdir in subdirs
         ]
@@ -211,23 +215,6 @@ def _walk_parallel(
             permission_error_entries.extend(child_permission_error_entries)
 
     return entries, permission_error_entries
-
-
-def _walk_subtree_worker(
-    base_path: str,
-    subtree_path: str,
-    max_depth: int,
-    include_hidden: bool,
-) -> tuple[list[FileEntry], list[str]]:
-    base = Path(base_path)
-    subtree = Path(subtree_path)
-    return _walk(
-        base,
-        subtree,
-        max_depth=max_depth,
-        include_hidden=include_hidden,
-        depth=1,
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -246,14 +233,16 @@ def _walk(
     """Yield :class:`FileEntry` objects by walking *current* recursively."""
     entries: list[FileEntry] = []
     permission_error_entries: list[str] = []
+    base_str = str(base)
 
     try:
-        children = list(current.iterdir())
+        with os.scandir(current) as it:
+            children = list(it)
     except PermissionError:
-        return [], [str(current.resolve())]
+        return [], [os.path.realpath(str(current))]
 
-    for child in sorted(children, key=lambda p: p.name.lower()):
-        if not include_hidden and child.name.startswith(":"):
+    for child in children:
+        if not include_hidden and child.name.startswith("."):
             continue
 
         try:
@@ -262,7 +251,7 @@ def _walk(
                 continue
             stat = child.stat()
         except PermissionError:
-            permission_error_entries.append(str(child.resolve()))
+            permission_error_entries.append(os.path.realpath(child.path))
             continue
         except OSError:
             continue
@@ -272,7 +261,7 @@ def _walk(
         size = 0 if is_dir else stat.st_size
 
         entries.append(FileEntry(
-            path=str(child.relative_to(base)),
+            path=os.path.relpath(child.path, base_str),
             is_dir=is_dir,
             size_bytes=size,
             modified_at=modified_at,
@@ -283,7 +272,7 @@ def _walk(
         if is_dir and depth < max_depth:
             child_entries, child_permission_error_entries = _walk(
                 base,
-                child,
+                Path(child.path),
                 max_depth=max_depth,
                 include_hidden=include_hidden,
                 depth=depth + 1,

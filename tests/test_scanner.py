@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -212,14 +213,14 @@ def test_scan_records_permission_denied_directory(tmp_path):
     blocked = tmp_path / "blocked"
     blocked.mkdir()
 
-    original_iterdir = Path.iterdir
+    original_scandir = os.scandir
 
-    def fake_iterdir(self):
-        if self == blocked:
+    def fake_scandir(path):
+        if os.path.realpath(path) == str(blocked.resolve()):
             raise PermissionError("denied")
-        return original_iterdir(self)
+        return original_scandir(path)
 
-    with patch("pathlib.Path.iterdir", fake_iterdir):
+    with patch("os.scandir", fake_scandir):
         result = scan_directory(tmp_path)
 
     assert str(blocked.resolve()) in result.permission_error_entries
@@ -229,14 +230,25 @@ def test_scan_records_permission_denied_child_stat(tmp_path):
     blocked = tmp_path / "blocked.txt"
     blocked.write_text("secret")
 
-    original_stat = Path.stat
+    original_scandir = os.scandir
 
-    def fake_stat(self, *args, **kwargs):
-        if self == blocked:
-            raise PermissionError("denied")
-        return original_stat(self, *args, **kwargs)
+    def fake_scandir(path):
+        with original_scandir(path) as it:
+            real_entries = list(it)
+        result = []
+        for entry in real_entries:
+            if entry.name == "blocked.txt":
+                m = MagicMock()
+                m.name = entry.name
+                m.path = entry.path
+                m.is_dir.return_value = False
+                m.stat.side_effect = PermissionError("denied")
+                result.append(m)
+            else:
+                result.append(entry)
+        return contextlib.nullcontext(iter(result))
 
-    with patch("pathlib.Path.stat", fake_stat):
+    with patch("os.scandir", fake_scandir):
         result = scan_directory(tmp_path)
 
     assert str(blocked.resolve()) in result.permission_error_entries
