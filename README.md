@@ -45,6 +45,21 @@ approve and run the generated shell script.
 
 No files are touched until you inspect and run the generated script.
 
+### SQL query mode (token-efficient alternative)
+
+For very large home directories the full file list can exceed a model's
+context window.  The **SQL query mode** solves this by:
+
+1. **Saving** the scan to a compact SQLite database (`--save-db`).
+2. **Sending only** the database schema + row count to the LLM — a constant
+   ~100 tokens regardless of scan size.
+3. **Receiving** a JSON list of SQL `SELECT` queries from the LLM, one per
+   purgeable category (caches, build artefacts, old job outputs, …).
+4. **Executing** each query locally against the read-only SQLite file and
+   collecting matching paths into a standard `PurgeReport`.
+
+Token usage is reduced by **10–100× or more** for file-heavy directories.
+
 ---
 
 ## Installation
@@ -184,6 +199,7 @@ bash review_purge.sh
 ```
 purgep scan DIR [DIR ...] [SCAN_OPTIONS]
 purgep query FILE [FILE ...] [QUERY_OPTIONS]
+purgep sqlquery DB [SQLQUERY_OPTIONS]
 ```
 
 **Tip:** Add `--folders-only` to `purgep scan` to only scan and report directories (folders), skipping all files for a much faster scan. Example:
@@ -224,6 +240,34 @@ bash review_purge.sh
 >   --batch-size 80 \
 >   --save-commands review_purge.sh
 > ```
+
+### Token-efficient SQL query workflow
+
+Use `--save-db` to write a SQLite database during scanning, then use
+`purgep sqlquery` to have the LLM generate SQL `SELECT` queries against it.
+The LLM receives only the schema + row count (~100 tokens), so this workflow
+scales to arbitrarily large directories without hitting context limits.
+
+```bash
+# 1 – Scan and save to SQLite
+purgep scan ~ --save-db home_scan.db
+
+# 2 – LLM generates SQL queries; results are executed locally
+purgep sqlquery home_scan.db \
+  --api-url http://localhost:11434/v1 \
+  --model phi3:mini \
+  --save-commands review_purge.sh
+
+# 3 – Inspect and run the review script as usual
+less review_purge.sh
+bash review_purge.sh
+```
+
+You can save both formats at once:
+
+```bash
+purgep scan ~ --save-scan home_scan.json --save-db home_scan.db
+```
 
 ### Scan a specific subdirectory
 
@@ -362,25 +406,53 @@ purgep ~/Downloads --api-url https://api.openai.com/v1 --model gpt-4o
 
 ### All options
 
+#### `purgep scan`
+
 | Option | Default | Description |
 |---|---|---|
-| `DIR` | *(conditional)* | One or more directories to scan (required unless `--from-scan` is used) |
-| `--scan-only` | *(off)* | Only scan directories and output scan data (skip LLM query) |
-| `--folders-only` | *(off)* | **Only scan and report directories (folders), skipping all files for speed.** |
+| `DIR` | *(required)* | One or more directories to scan |
+| `--folders-only` | *(off)* | Only scan and report directories, skipping files |
 | `--save-scan FILE` | *(none)* | Save scan JSON to a file (single directory only) |
-| `--from-scan FILE [FILE ...]` | *(none)* | Load saved scan JSON and run only the LLM query step |
-| `--save-commands FILE` | *(none)* | Write suggested `mv`/`rm` review commands to a shell script; inspect before running |
-| `--api-url URL` | `http://localhost:11434/v1` | OpenAI-compatible API base URL |
-| `--model NAME` | `llama3` | LLM model name |
-| `--api-key TOKEN` | *(none)* | Bearer token for the API |
-| `--threshold FLOAT` | `0.7` | Confidence cut-off for "high risk" summary |
+| `--save-db FILE` | *(none)* | Save scan to a SQLite database for use with `sqlquery` (single directory only) |
+| `--save-commands FILE` | *(none)* | Write suggested `mv`/`rm` review commands to a shell script |
 | `--max-depth INT` | `10` | Maximum recursion depth |
 | `--processes INT` | `1` | Number of worker processes used while scanning |
 | `--include-hidden` | *(off)* | Include hidden files/dirs (`.` prefix) |
 | `--output text\|json` | `text` | Output format |
-| `--timeout SECONDS` | `120` | HTTP request timeout |
+| `--config FILE` | `config.md` | Path to configuration markdown file |
+| `-v, --verbose` | *(off)* | Enable debug logging |
+
+#### `purgep query`
+
+| Option | Default | Description |
+|---|---|---|
+| `FILE` | *(required)* | One or more scan JSON files produced by `purgep scan --save-scan` |
+| `--api-url URL` | `http://localhost:11434/v1` | OpenAI-compatible API base URL |
+| `--model NAME` | `llama3` | LLM model name |
+| `--api-key TOKEN` | *(none)* | Bearer token for the API |
+| `--threshold FLOAT` | `0.7` | Confidence cut-off for "high risk" summary |
 | `--batch-size INT` | `50` | Entries per LLM request; reduce for small-context models |
-| `--num-ctx INT` | *(model default)* | Ollama context window size in tokens (e.g. `8192`); passed via `options.num_ctx` |
+| `--num-ctx INT` | *(model default)* | Ollama context window size in tokens (e.g. `8192`) |
+| `--save-commands FILE` | *(none)* | Write suggested `mv`/`rm` review commands to a shell script |
+| `--output text\|json` | `text` | Output format |
+| `--timeout SECONDS` | `120` | HTTP request timeout |
+| `--config FILE` | `config.md` | Path to configuration markdown file |
+| `-v, --verbose` | *(off)* | Enable debug logging |
+
+#### `purgep sqlquery`
+
+| Option | Default | Description |
+|---|---|---|
+| `DB` | *(required)* | SQLite database file produced by `purgep scan --save-db` |
+| `--api-url URL` | `http://localhost:11434/v1` | OpenAI-compatible API base URL |
+| `--model NAME` | `llama3` | LLM model name |
+| `--api-key TOKEN` | *(none)* | Bearer token for the API |
+| `--threshold FLOAT` | `0.7` | Confidence cut-off for "high risk" summary |
+| `--num-ctx INT` | *(model default)* | Ollama context window size in tokens (e.g. `8192`) |
+| `--save-commands FILE` | *(none)* | Write suggested `mv`/`rm` review commands to a shell script |
+| `--output text\|json` | `text` | Output format |
+| `--timeout SECONDS` | `120` | HTTP request timeout |
+| `--config FILE` | `config.md` | Path to configuration markdown file |
 | `-v, --verbose` | *(off)* | Enable debug logging |
 
 ---
@@ -418,13 +490,17 @@ pytest
 
 ```
 purge_pilot/
-  __init__.py      – package marker
-  scanner.py       – recursive directory walker
-  llm_client.py    – OpenAI-compatible LLM API client
-  main.py          – CLI entry point
+  __init__.py         – package marker
+  scanner.py          – recursive directory walker
+  llm_client.py       – OpenAI-compatible LLM API client (JSON-batch mode)
+  llm_sql_client.py   – LLM SQL query mode (token-efficient alternative)
+  store.py            – SQLite persistence (save_to_sqlite / load_from_sqlite)
+  main.py             – CLI entry point (scan / query / sqlquery subcommands)
 tests/
   test_scanner.py
   test_llm_client.py
+  test_llm_sql_client.py
+  test_store.py
   test_main.py
 environment.yml    – conda environment (includes Ollama)
 pyproject.toml
@@ -442,6 +518,12 @@ From the repository root, run the CLI directly from source:
 ```bash
 python -m purge_pilot.main scan ~ --save-scan home_scan.json
 python -m purge_pilot.main query home_scan.json \
+  --api-url http://localhost:11434/v1 \
+  --model phi3:mini
+
+# SQL query mode
+python -m purge_pilot.main scan ~ --save-db home_scan.db
+python -m purge_pilot.main sqlquery home_scan.db \
   --api-url http://localhost:11434/v1 \
   --model phi3:mini
 ```
