@@ -301,8 +301,8 @@ def _build_parser() -> argparse.ArgumentParser:
             "Scan a Linux home directory on an HPC cluster and use an LLM server "
             "to estimate how confidently each file or sub-folder can be purged, "
             "helping you reclaim home quota without deleting important files. "
-            "Typical usage: purgep scan ~ --save-scan home_scan.json, "
-            "then purgep query home_scan.json --api-url http://localhost:11434/v1 "
+            "Typical usage: purgep scan ~, "
+            "then purgep sqlquery scan.db --api-url http://localhost:11434/v1 "
             "--model phi3:mini --save-commands review_purge.sh"
         ),
     )
@@ -399,11 +399,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Only scan and report directories, not files.",
     )
     parser.add_argument(
-        "--save-scan",
-        metavar="FILE",
-        help="Write the scan JSON to a file (single directory only).",
-    )
-    parser.add_argument(
         "--save-commands",
         metavar="FILE",
         help="Write suggested review commands to a shell script instead of touching data.",
@@ -433,7 +428,6 @@ def _build_subcommand_parser() -> argparse.ArgumentParser:
     scan_parser.add_argument("--processes", type=_positive_int, default=1, metavar="INT")
     scan_parser.add_argument("--include-hidden", action="store_true")
     scan_parser.add_argument("--output", choices=["text", "json"], default="text")
-    scan_parser.add_argument("--save-scan", metavar="FILE")
     scan_parser.add_argument(
         "--save-db",
         metavar="FILE",
@@ -456,32 +450,6 @@ def _build_subcommand_parser() -> argparse.ArgumentParser:
     scan_parser.add_argument("--config", default="config.md")
     scan_parser.add_argument("--folders-only", action="store_true", help="Only scan and report directories, not files.")
     scan_parser.add_argument("-v", "--verbose", action="store_true")
-
-    query_parser = subparsers.add_parser(
-        "query",
-        help="Query the LLM using one or more saved scan JSON files.",
-    )
-    query_parser.add_argument("scan_files", metavar="FILE", nargs="+")
-    query_parser.add_argument( 
-        "--api-url",
-        default=os.environ.get("PURGE_PILOT_API_URL", "http://localhost:11434/v1"),
-    )
-    query_parser.add_argument(
-        "--model",
-        default=os.environ.get("PURGE_PILOT_MODEL", "llama3"),
-    )
-    query_parser.add_argument(
-        "--api-key",
-        default=os.environ.get("PURGE_PILOT_API_KEY"),
-    )
-    query_parser.add_argument("--threshold", type=float, default=0.7, metavar="FLOAT")
-    query_parser.add_argument("--output", choices=["text", "json"], default="text")
-    query_parser.add_argument("--timeout", type=int, default=120, metavar="SECONDS")
-    query_parser.add_argument("--batch-size", type=_positive_int, default=50, metavar="INT")
-    query_parser.add_argument("--num-ctx", type=_positive_int, default=None, metavar="INT")
-    query_parser.add_argument("--save-commands", metavar="FILE")
-    query_parser.add_argument("--config", default="config.md")
-    query_parser.add_argument("-v", "--verbose", action="store_true")
 
     sqlquery_parser = subparsers.add_parser(
         "sqlquery",
@@ -517,14 +485,6 @@ def _build_subcommand_parser() -> argparse.ArgumentParser:
     sqlquery_parser.add_argument("-v", "--verbose", action="store_true")
 
     return parser
-
-
-def _load_scan_result(path: Path) -> ScanResult:
-    with open(path, encoding="utf-8") as f:
-        raw = json.load(f)
-    if not isinstance(raw, dict):
-        raise ValueError(f"Scan file must contain a JSON object: {path}")
-    return ScanResult.from_dict(raw)
 
 
 def _apply_config_overrides(report, config: dict) -> None:
@@ -651,7 +611,7 @@ def main(argv: List[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
 
-    # Dispatch to subcommand parser if first arg is 'scan' or 'query'
+    # Dispatch to subcommand parser if first arg is a known/legacy subcommand token.
     if argv and argv[0] in {"scan", "query", "sqlquery"}:
         parser = _build_subcommand_parser()
         args = parser.parse_args(argv)
@@ -695,15 +655,6 @@ def main(argv: List[str] | None = None) -> int:
                 if getattr(args, "folders_only", False):
                     scan_result.entries = [e for e in scan_result.entries if getattr(e, "is_dir", False)]
                 scan_results.append(scan_result)
-                # Optionally save scan 
-                if args.save_scan:
-                    if len(args.directories) > 1:
-                        print("ERROR: --save-scan only supports a single directory.", file=sys.stderr)
-                        exit_code = 1
-                    else:
-                        with open(args.save_scan, "w", encoding="utf-8") as f:
-                            f.write(json.dumps(scan_result.to_dict(), indent=2))
-                        print(f"Saved scan to {Path(args.save_scan).resolve()}", file=sys.stderr)
                 # Save to SQLite by default. If --save-db is omitted, pick a default path.
                 save_db_path: Path | None
                 if getattr(args, "save_db", None):
@@ -731,48 +682,6 @@ def main(argv: List[str] | None = None) -> int:
                 else:
                     print(f"Scanned {directory}: {len(scan_result.entries)} entries")
             if args.save_commands and scan_results:
-                command_file = Path(args.save_commands)
-                action_count = _write_review_commands(command_file, command_sections)
-                print(
-                    f"Saved {action_count} review commands to {command_file.resolve()}",
-                    file=sys.stderr,
-                )
-            return exit_code
-        elif args.command == "query":
-            exit_code = 0
-            config_path = Path(args.config)
-            if not config_path.exists():
-                print(f"ERROR: Config file not found: {config_path}", file=sys.stderr)
-                return 1
-            config = parse_config(config_path)
-            system_prompt = config.get("prompt", _SYSTEM_PROMPT)
-            command_sections: list[list[str]] = []
-            for scan_file in args.scan_files:
-                scan_path = Path(scan_file)
-                if not scan_path.exists():
-                    print(f"ERROR: Scan file not found: {scan_file}", file=sys.stderr)
-                    exit_code = 1
-                    continue
-                scan_result = _load_scan_result(scan_path)
-                try:
-                    ai_scan_result = _filter_ai_scan_entries(scan_result, config)
-                    ai_scan_result = _build_directory_summary_scan(ai_scan_result)
-                    report = _query_scan_result(args, ai_scan_result, system_prompt)
-                except Exception as exc:
-                    print(f"ERROR: LLM request failed for {scan_file}: {exc}", file=sys.stderr)
-                    exit_code = 1
-                    continue
-                _ensure_rule_based_entries_in_report(report, scan_result, config)
-                _apply_config_overrides(report, config)
-                if args.save_commands:
-                    command_sections.append(
-                        _build_review_commands(report, scan_result, config, threshold=args.threshold)
-                    )
-                if args.output == "json":
-                    print(json.dumps(report.to_dict(), indent=2))
-                else:
-                    _print_text_report(report, threshold=args.threshold)
-            if args.save_commands and command_sections:
                 command_file = Path(args.save_commands)
                 action_count = _write_review_commands(command_file, command_sections)
                 print(
