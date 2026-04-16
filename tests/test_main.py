@@ -142,8 +142,10 @@ def test_main_llm_error_returns_nonzero(tmp_path, capsys):
 
 
 def test_main_scan_passes_max_depth(tmp_path):
+    from purge_pilot.scanner import ScanResult
+
     with patch("purge_pilot.main.scan_directory") as mock_scan:
-        mock_scan.return_value = MagicMock(entries=[], total_size_bytes=0)
+        mock_scan.return_value = ScanResult(root=str(tmp_path), entries=[])
         main(["scan", str(tmp_path), "--max-depth", "3"])
 
     _, kwargs = mock_scan.call_args
@@ -151,8 +153,10 @@ def test_main_scan_passes_max_depth(tmp_path):
 
 
 def test_main_scan_passes_include_hidden(tmp_path):
+    from purge_pilot.scanner import ScanResult
+
     with patch("purge_pilot.main.scan_directory") as mock_scan:
-        mock_scan.return_value = MagicMock(entries=[], total_size_bytes=0)
+        mock_scan.return_value = ScanResult(root=str(tmp_path), entries=[])
         main(["scan", str(tmp_path), "--include-hidden"])
 
     _, kwargs = mock_scan.call_args
@@ -160,8 +164,10 @@ def test_main_scan_passes_include_hidden(tmp_path):
 
 
 def test_main_scan_passes_processes(tmp_path):
+    from purge_pilot.scanner import ScanResult
+
     with patch("purge_pilot.main.scan_directory") as mock_scan:
-        mock_scan.return_value = MagicMock(entries=[], total_size_bytes=0)
+        mock_scan.return_value = ScanResult(root=str(tmp_path), entries=[])
         main(["scan", str(tmp_path), "--processes", "3"])
 
     _, kwargs = mock_scan.call_args
@@ -638,6 +644,46 @@ def test_main_query_directory_summary_keeps_root_level_files(tmp_path):
 # ---------------------------------------------------------------------------
 # sqlquery subcommand tests
 # ---------------------------------------------------------------------------
+
+
+def test_scan_saves_default_db_when_save_db_omitted(tmp_path, capsys, monkeypatch):
+    from purge_pilot.scanner import ScanResult
+
+    monkeypatch.chdir(tmp_path)
+    config_file = tmp_path / "config.md"
+    config_file.write_text("## AI Prompt\n\n```\ntest\n```\n", encoding="utf-8")
+
+    real_scan = ScanResult(root=str(tmp_path), entries=[])
+
+    with patch("purge_pilot.main.scan_directory", return_value=real_scan):
+        rc = main(["scan", str(tmp_path), "--config", str(config_file)])
+
+    assert rc == 0
+    assert (tmp_path / "scan.db").exists()
+    assert "scan database" in capsys.readouterr().err
+
+
+def test_scan_multi_directory_saves_default_db_per_directory(tmp_path, monkeypatch):
+    from purge_pilot.scanner import ScanResult
+
+    monkeypatch.chdir(tmp_path)
+    config_file = tmp_path / "config.md"
+    config_file.write_text("## AI Prompt\n\n```\ntest\n```\n", encoding="utf-8")
+
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+
+    def _scan_side_effect(directory, **_kwargs):
+        return ScanResult(root=str(directory), entries=[])
+
+    with patch("purge_pilot.main.scan_directory", side_effect=_scan_side_effect):
+        rc = main(["scan", str(first), str(second), "--config", str(config_file)])
+
+    assert rc == 0
+    assert (tmp_path / "first_scan.db").exists()
+    assert (tmp_path / "second_scan.db").exists()
 
 
 def test_scan_save_db_creates_sqlite_file(tmp_path, capsys):

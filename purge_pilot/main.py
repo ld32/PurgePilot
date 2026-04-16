@@ -31,6 +31,16 @@ def _positive_int(value: str) -> int:
     return parsed
 
 
+def _default_scan_db_path(directory: Path, *, multiple_directories: bool) -> Path:
+    """Return the default SQLite output path for scan results."""
+    if not multiple_directories:
+        return Path("scan.db")
+
+    name = directory.resolve().name or "scan"
+    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._") or "scan"
+    return Path(f"{safe_name}_scan.db")
+
+
 def parse_config(config_path: Path) -> dict:
     """Parse the markdown config file."""
     with open(config_path, encoding='utf-8') as f:
@@ -424,8 +434,15 @@ def _build_subcommand_parser() -> argparse.ArgumentParser:
     scan_parser.add_argument("--include-hidden", action="store_true")
     scan_parser.add_argument("--output", choices=["text", "json"], default="text")
     scan_parser.add_argument("--save-scan", metavar="FILE")
-    scan_parser.add_argument("--save-db", metavar="FILE",
-                             help="Save scan data to a SQLite database file.")
+    scan_parser.add_argument(
+        "--save-db",
+        metavar="FILE",
+        default=None,
+        help=(
+            "Save scan data to a SQLite database file. "
+            "Defaults to scan.db when omitted (or <dirname>_scan.db for multi-directory scans)."
+        ),
+    )
     scan_parser.add_argument(
         "--incremental",
         action="store_true",
@@ -687,17 +704,27 @@ def main(argv: List[str] | None = None) -> int:
                         with open(args.save_scan, "w", encoding="utf-8") as f:
                             f.write(json.dumps(scan_result.to_dict(), indent=2))
                         print(f"Saved scan to {Path(args.save_scan).resolve()}", file=sys.stderr)
-                # Optionally save to SQLite
+                # Save to SQLite by default. If --save-db is omitted, pick a default path.
+                save_db_path: Path | None
                 if getattr(args, "save_db", None):
                     if len(args.directories) > 1:
                         print("ERROR: --save-db only supports a single directory.", file=sys.stderr)
                         exit_code = 1
+                        save_db_path = None
                     else:
-                        if getattr(args, "incremental", False):
-                            upsert_scan_result(scan_result, args.save_db)
-                        else:
-                            save_to_sqlite(scan_result, args.save_db)
-                        print(f"Saved scan database to {Path(args.save_db).resolve()}", file=sys.stderr)
+                        save_db_path = Path(args.save_db)
+                else:
+                    save_db_path = _default_scan_db_path(
+                        dir_path,
+                        multiple_directories=len(args.directories) > 1,
+                    )
+
+                if save_db_path is not None:
+                    if getattr(args, "incremental", False):
+                        upsert_scan_result(scan_result, save_db_path)
+                    else:
+                        save_to_sqlite(scan_result, save_db_path)
+                    print(f"Saved scan database to {save_db_path.resolve()}", file=sys.stderr)
                 # Optionally print scan summary
                 if args.output == "json":
                     print(json.dumps(scan_result.to_dict(), indent=2))

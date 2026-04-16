@@ -50,7 +50,7 @@ No files are touched until you inspect and run the generated script.
 For very large home directories the full file list can exceed a model's
 context window.  The **SQL query mode** solves this by:
 
-1. **Saving** the scan to a compact SQLite database (`--save-db`).
+1. **Saving** the scan to a compact SQLite database (default: `scan.db`, or custom via `--save-db`).
 2. **Sending only** the database schema + row count to the LLM — a constant
    ~100 tokens regardless of scan size.
 3. **Receiving** a JSON list of SQL `SELECT` queries from the LLM, one per
@@ -243,17 +243,19 @@ bash review_purge.sh
 
 ### Token-efficient SQL query workflow
 
-Use `--save-db` to write a SQLite database during scanning, then use
+`purgep scan` now writes a SQLite database during scanning by default
+(`scan.db` for a single directory, or `<dirname>_scan.db` for multi-directory scans).
+You can override the output path with `--save-db`. Then use
 `purgep sqlquery` to have the LLM generate SQL `SELECT` queries against it.
 The LLM receives only the schema + row count (~100 tokens), so this workflow
 scales to arbitrarily large directories without hitting context limits.
 
 ```bash
-# 1 – Scan and save to SQLite
-purgep scan ~ --save-db home_scan.db
+# 1 – Scan (writes scan.db by default)
+purgep scan ~
 
 # 2 – LLM generates SQL queries; results are executed locally
-purgep sqlquery home_scan.db \
+purgep sqlquery scan.db \
   --api-url http://localhost:11434/v1 \
   --model phi3:mini \
   --save-commands review_purge.sh
@@ -413,7 +415,7 @@ purgep ~/Downloads --api-url https://api.openai.com/v1 --model gpt-4o
 | `DIR` | *(required)* | One or more directories to scan |
 | `--folders-only` | *(off)* | Only scan and report directories, skipping files |
 | `--save-scan FILE` | *(none)* | Save scan JSON to a file (single directory only) |
-| `--save-db FILE` | *(none)* | Save scan to a SQLite database for use with `sqlquery` (single directory only) |
+| `--save-db FILE` | `scan.db` | Save scan to a SQLite database for use with `sqlquery` (default: `scan.db`; for multi-directory scans without `--save-db`, defaults to `<dirname>_scan.db`) |
 | `--save-commands FILE` | *(none)* | Write suggested `mv`/`rm` review commands to a shell script |
 | `--max-depth INT` | `10` | Maximum recursion depth |
 | `--processes INT` | `1` | Number of worker processes used while scanning |
