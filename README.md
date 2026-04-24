@@ -33,9 +33,9 @@ approve and run the generated shell script.
 1. **Scan** – PurgePilot walks your home directory (or any subdirectory) and
   collects metadata (path, size, last-modified timestamp, last-accessed timestamp) for every file and
   sub-folder.
-2. **Ask** – The file list is sent as a prompt to any
-   [OpenAI-compatible](https://platform.openai.com/docs/api-reference/chat)
-   chat-completions endpoint (local [Ollama](https://ollama.com), OpenAI, etc.).
+2. **Ask** – The scan results are sent (as a file list or as a SQLite database) to any
+  [OpenAI-compatible](https://platform.openai.com/docs/api-reference/chat)
+  chat-completions endpoint (local [Ollama](https://ollama.com), OpenAI, etc.) using the two-step workflow.
 3. **Estimate** – The LLM returns a confidence score (`0.0` = keep,
    `1.0` = definitely purge) and a short reason for each entry, informed by
    HPC-specific patterns in `config.md`.
@@ -45,18 +45,19 @@ approve and run the generated shell script.
 
 No files are touched until you inspect and run the generated script.
 
+
 ### SQL query mode (token-efficient alternative)
 
-For very large home directories the full file list can exceed a model's
-context window.  The **SQL query mode** solves this by:
+For very large home directories, the full file list can exceed a model's
+context window. The **SQL query mode** solves this by:
 
 1. **Saving** the scan to a compact SQLite database (default: `scan.db`, or custom via `--save-db`).
 2. **Sending only** the database schema + row count to the LLM — a constant
-   ~100 tokens regardless of scan size.
+  ~100 tokens regardless of scan size.
 3. **Receiving** a JSON list of SQL `SELECT` queries from the LLM, one per
-   purgeable category (caches, build artefacts, old job outputs, …).
+  purgeable category (caches, build artefacts, old job outputs, …).
 4. **Executing** each query locally against the read-only SQLite file and
-   collecting matching paths into a standard `PurgeReport`.
+  collecting matching paths into a standard `PurgeReport`.
 
 Token usage is reduced by **10–100× or more** for file-heavy directories.
 
@@ -201,10 +202,12 @@ purgep scan DIR [DIR ...] [SCAN_OPTIONS]
 purgep sqlquery DB [SQLQUERY_OPTIONS]
 ```
 
+
 **Tip:** Add `--folders-only` to `purgep scan` to only scan and report directories (folders), skipping all files for a much faster scan. Example:
 
 ```bash
-purgep scan ~ --folders-only
+purgep scan ~ --folders-only --save-db scan.db
+purgep sqlquery scan.db --model llama3
 ```
 
 The two-step (split) workflow is the default: scan first, query separately.
@@ -353,28 +356,36 @@ less review-purge.sh   # inspect
 bash review-purge.sh   # run when satisfied
 ```
 
+purgep ~/Downloads --api-url https://api.openai.com/v1 --model gpt-4o
 ### Examples
 
-Scan a single directory using a local Ollama server:
-
+# Scan a single directory using a local Ollama server (two-step workflow):
 ```bash
-purgep /mnt/data/backups --api-url http://localhost:11434/v1 --model llama3
+purgep scan /mnt/data/backups --save-db backups_scan.db
+purgep sqlquery backups_scan.db \
+  --api-url http://localhost:11434/v1 \
+  --model llama3
 ```
 
-Scan multiple directories and output JSON:
-
+# Scan multiple directories and output JSON (two-step workflow):
 ```bash
-purgep /tmp/logs /var/cache \
+purgep scan /tmp/logs /var/cache --save-db logs_scan.db
+purgep sqlquery logs_scan.db \
   --api-url http://localhost:11434/v1 \
   --model llama3 \
   --output json
 ```
 
-Use the OpenAI API with an API key from an environment variable:
+Use the OpenAI API with an API key from an environment variable (two-step workflow):
 
 ```bash
 export PURGE_PILOT_API_KEY="sk-..."
-purgep ~/Downloads --api-url https://api.openai.com/v1 --model gpt-4o
+# 1 – Scan and save to a database
+purgep scan ~/Downloads --save-db downloads_scan.db
+# 2 – Query the LLM using the saved database
+purgep sqlquery downloads_scan.db \
+  --api-url https://api.openai.com/v1 \
+  --model gpt-4o
 ```
 
 ### Environment variables
