@@ -367,14 +367,15 @@ purgep sqlquery backups_scan.db \
   --model llama3
 ```
 
-# Scan multiple directories and output JSON (two-step workflow):
+
+# Scan multiple directories and output results (two-step workflow):
 ```bash
 purgep scan /tmp/logs /var/cache --save-db logs_scan.db
 purgep sqlquery logs_scan.db \
   --api-url http://localhost:11434/v1 \
-  --model llama3 \
-  --output json
+  --model llama3
 ```
+Results will be printed in text format. JSON output is no longer supported for scan results.
 
 Use the OpenAI API with an API key from an environment variable (two-step workflow):
 
