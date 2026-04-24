@@ -489,6 +489,7 @@ python -m purge_pilot.main scan ~ --save-db home_scan.db
 python -m purge_pilot.main sqlquery home_scan.db \
   --api-url http://localhost:11434/v1 \
   --model phi3:mini
+
 ```
 
 If your environment does not resolve local imports automatically:
