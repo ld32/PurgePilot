@@ -148,7 +148,21 @@ def test_sqlquery_success(tmp_path, capsys):
 
 def test_sqlquery_json_output(tmp_path, capsys):
     db_file = tmp_path / "scan.db"
-    save_to_sqlite(ScanResult(root=str(tmp_path), entries=[]), db_file)
+    save_to_sqlite(
+        ScanResult(
+            root=str(tmp_path),
+            entries=[
+                FileEntry(
+                    path="old.tar.gz",
+                    is_dir=False,
+                    size_bytes=100,
+                    modified_at=datetime(2022, 1, 1, tzinfo=timezone.utc),
+                    depth=0,
+                )
+            ],
+        ),
+        db_file,
+    )
 
     report = PurgeReport(
         root=str(tmp_path),
@@ -181,13 +195,40 @@ def test_sqlquery_nonexistent_db(tmp_path, capsys):
 
 def test_sqlquery_llm_error(tmp_path, capsys):
     db_file = tmp_path / "scan.db"
-    save_to_sqlite(ScanResult(root=str(tmp_path), entries=[]), db_file)
+    save_to_sqlite(
+        ScanResult(
+            root=str(tmp_path),
+            entries=[
+                FileEntry(
+                    path="cache.tmp",
+                    is_dir=False,
+                    size_bytes=1,
+                    modified_at=datetime(2022, 1, 1, tzinfo=timezone.utc),
+                    depth=0,
+                )
+            ],
+        ),
+        db_file,
+    )
 
     with patch("purge_pilot.main.estimate_purge_confidence_sql", side_effect=RuntimeError("timeout")):
         rc = main(["sqlquery", str(db_file), "--api-url", "http://bad/v1", "--model", "x"])
 
     assert rc == 1
     assert "timeout" in capsys.readouterr().err.lower()
+
+
+def test_sqlquery_empty_db_skips_llm_call(tmp_path, capsys):
+    db_file = tmp_path / "scan.db"
+    save_to_sqlite(ScanResult(root=str(tmp_path), entries=[]), db_file)
+
+    with patch("purge_pilot.main.estimate_purge_confidence_sql") as mock_estimate:
+        rc = main(["sqlquery", str(db_file), "--api-url", "http://localhost/v1", "--model", "llama3"])
+
+    assert rc == 0
+    mock_estimate.assert_not_called()
+    stderr = capsys.readouterr().err
+    assert "skipping llm query" in stderr.lower()
 
 
 def test_sqlquery_saves_commands(tmp_path):

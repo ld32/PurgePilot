@@ -2,8 +2,9 @@ home_scan*
 *.log
 log
 testdata/
-scan.db 
+*.db 
 push.sh
+*.jsonl
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

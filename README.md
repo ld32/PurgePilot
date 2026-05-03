@@ -396,6 +396,9 @@ purgep sqlquery downloads_scan.db \
 | `PURGE_PILOT_API_URL` | Default value for `--api-url` |
 | `PURGE_PILOT_MODEL` | Default value for `--model` |
 | `PURGE_PILOT_API_KEY` | Default value for `--api-key` |
+| `PURGE_PILOT_LOG_CONVERSATION` | Enable/disable JSONL conversation logging (`1` by default; set `0` to disable) |
+| `PURGE_PILOT_CONVERSATION_LOG` | Path to conversation log file (default: `conversation_log.jsonl`) |
+| `PURGE_PILOT_RUN_ID` | Optional run identifier written on each conversation log entry (auto-generated if unset) |
 
 ### All options
 
@@ -412,7 +415,7 @@ purgep sqlquery downloads_scan.db \
 | `--include-hidden` | *(off)* | Include hidden files/dirs (`.` prefix) |
 | `--output text\|json` | `text` | Output format |
 | `--config FILE` | `config.md` | Path to configuration markdown file |
-| `-v, --verbose` | *(off)* | Enable debug logging |
+| `-v, --verbose` | *(on)* | Enable debug logging (enabled by default) |
 
 #### `purgep sqlquery`
 
@@ -428,7 +431,7 @@ purgep sqlquery downloads_scan.db \
 | `--output text\|json` | `text` | Output format |
 | `--timeout SECONDS` | `120` | HTTP request timeout |
 | `--config FILE` | `config.md` | Path to configuration markdown file |
-| `-v, --verbose` | *(off)* | Enable debug logging |
+| `-v, --verbose` | *(on)* | Enable debug logging (enabled by default) |
 
 ---
 

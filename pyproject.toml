@@ -21,5 +21,8 @@ dev = [
     "responses>=0.25",
 ]
 
+[tool.setuptools.packages.find]
+include = ["purge_pilot*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

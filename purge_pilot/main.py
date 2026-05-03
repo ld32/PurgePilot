@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List
 
-from .llm_client import PurgeEstimate, estimate_purge_confidence, _SYSTEM_PROMPT
+from .llm_client import PurgeEstimate, PurgeReport, estimate_purge_confidence, _SYSTEM_PROMPT
 from .llm_sql_client import estimate_purge_confidence_sql
 from .scanner import FileEntry, ScanResult, scan_directory
 from .store import load_from_sqlite, save_to_sqlite, upsert_scan_result
@@ -386,7 +386,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "-v", "--verbose",
         action="store_true",
-        help="Enable verbose/debug logging.",
+        default=True,
+        help="Enable verbose/debug logging (enabled by default).",
     )
     parser.add_argument(
         "--config",
@@ -449,7 +450,13 @@ def _build_subcommand_parser() -> argparse.ArgumentParser:
     scan_parser.add_argument("--save-commands", metavar="FILE")
     scan_parser.add_argument("--config", default="config.md")
     scan_parser.add_argument("--folders-only", action="store_true", help="Only scan and report directories, not files.")
-    scan_parser.add_argument("-v", "--verbose", action="store_true")
+    scan_parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        default=True,
+        help="Enable verbose/debug logging (enabled by default).",
+    )
 
     sqlquery_parser = subparsers.add_parser(
         "sqlquery",
@@ -482,7 +489,13 @@ def _build_subcommand_parser() -> argparse.ArgumentParser:
     sqlquery_parser.add_argument("--num-ctx", type=_positive_int, default=None, metavar="INT")
     sqlquery_parser.add_argument("--save-commands", metavar="FILE")
     sqlquery_parser.add_argument("--config", default="config.md")
-    sqlquery_parser.add_argument("-v", "--verbose", action="store_true")
+    sqlquery_parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        default=True,
+        help="Enable verbose/debug logging (enabled by default).",
+    )
 
     return parser
 
@@ -704,19 +717,26 @@ def main(argv: List[str] | None = None) -> int:
 
             try:
                 scan_result = load_from_sqlite(db_path)
-                print(
-                    f"  Loaded {len(scan_result.entries)} entries from {db_path}. "
-                    "Querying LLM (SQL mode) …",
-                    file=sys.stderr,
-                )
-                report = estimate_purge_confidence_sql(
-                    db_path,
-                    api_url=args.api_url,
-                    model=args.model,
-                    api_key=args.api_key,
-                    timeout=args.timeout,
-                    num_ctx=getattr(args, "num_ctx", None),
-                )
+                if not scan_result.entries:
+                    print(
+                        f"  Loaded 0 entries from {db_path}. Skipping LLM query (SQL mode).",
+                        file=sys.stderr,
+                    )
+                    report = PurgeReport(root=scan_result.root, estimates=[])
+                else:
+                    print(
+                        f"  Loaded {len(scan_result.entries)} entries from {db_path}. "
+                        "Querying LLM (SQL mode) …",
+                        file=sys.stderr,
+                    )
+                    report = estimate_purge_confidence_sql(
+                        db_path,
+                        api_url=args.api_url,
+                        model=args.model,
+                        api_key=args.api_key,
+                        timeout=args.timeout,
+                        num_ctx=getattr(args, "num_ctx", None),
+                    )
             except Exception as exc:
                 print(f"ERROR: SQL query mode failed: {exc}", file=sys.stderr)
                 return 1

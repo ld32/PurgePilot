@@ -4,14 +4,21 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional
+from uuid import uuid4
 
 import requests
 
 from .scanner import ScanResult
 
 logger = logging.getLogger(__name__)
+
+# Stable for the current process invocation; can be overridden by env for tooling.
+_RUN_ID = os.environ.get("PURGE_PILOT_RUN_ID", "").strip() or str(uuid4())
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -196,12 +203,68 @@ def _request_completion(
     timeout: int,
 ) -> str:
     """Send one chat completion request and return normalized message content."""
+    _append_conversation_log(
+        {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": "request",
+            "endpoint": endpoint,
+            "headers": _redact_headers(headers),
+            "payload": payload,
+            "timeout": timeout,
+        }
+    )
     response = requests.post(endpoint, headers=headers, json=payload, timeout=timeout)
     response.raise_for_status()
 
     raw = response.json()
+    _append_conversation_log(
+        {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": "response",
+            "endpoint": endpoint,
+            "status_code": response.status_code,
+            "response": raw,
+        }
+    )
     content = raw["choices"][0]["message"]["content"]
     return _normalize_content(content)
+
+
+def _conversation_logging_enabled() -> bool:
+    value = os.environ.get("PURGE_PILOT_LOG_CONVERSATION", "1").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def _conversation_log_path() -> Path:
+    value = os.environ.get("PURGE_PILOT_CONVERSATION_LOG", "conversation_log.jsonl").strip()
+    if not value:
+        value = "conversation_log.jsonl"
+    return Path(value)
+
+
+def _redact_headers(headers: Dict[str, str]) -> Dict[str, str]:
+    safe = dict(headers)
+    auth = safe.get("Authorization")
+    if auth:
+        safe["Authorization"] = "Bearer ***REDACTED***"
+    return safe
+
+
+def _append_conversation_log(event: Dict[str, Any]) -> None:
+    if not _conversation_logging_enabled():
+        return
+
+    if "run_id" not in event:
+        event = {"run_id": _RUN_ID, **event}
+
+    path = _conversation_log_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(event, ensure_ascii=False))
+            handle.write("\n")
+    except Exception as exc:
+        logger.warning("Failed to write conversation log %s: %s", path, exc)
 
 
 def _repair_completion(
