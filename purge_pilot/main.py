@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import shlex
+import sqlite3
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -39,6 +40,138 @@ def _default_scan_db_path(directory: Path, *, multiple_directories: bool) -> Pat
     name = directory.resolve().name or "scan"
     safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._") or "scan"
     return Path(f"{safe_name}_scan.db")
+
+
+def _prompt_int(prompt: str, *, minimum: int = 0, default: int | None = None) -> int:
+    while True:
+        raw = input(prompt).strip()
+        if raw == "" and default is not None:
+            return default
+        try:
+            value = int(raw)
+        except ValueError:
+            print("Please enter a valid integer.")
+            continue
+        if value < minimum:
+            print(f"Please enter a value >= {minimum}.")
+            continue
+        return value
+
+
+def _print_db_query_rows(rows: list[tuple], *, max_width: int = 80) -> None:
+    if not rows:
+        print("No matching rows.")
+        return
+
+    total = len(rows)
+    threshold = 10
+
+    for idx, row in enumerate(rows[:5], 1):
+        path, is_dir, size_bytes, modified_at, accessed_at, depth = row
+        short_path = path if len(path) <= max_width else path[: max_width - 3] + "..."
+        entry_type = "dir" if is_dir else "file"
+        print(
+            f"{idx:>3}. {short_path} | {entry_type} | size={size_bytes} | "
+            f"accessed={accessed_at or 'NULL'} | modified={modified_at} | depth={depth}"
+        )
+
+    if total > threshold:
+        omitted = total - 10
+        print(f"      ... ({omitted} more row{'s' if omitted > 1 else ''}) ...")
+        for idx, row in enumerate(rows[-5:], total - 4):
+            path, is_dir, size_bytes, modified_at, accessed_at, depth = row
+            short_path = path if len(path) <= max_width else path[: max_width - 3] + "..."
+            entry_type = "dir" if is_dir else "file"
+            print(
+                f"{idx:>3}. {short_path} | {entry_type} | size={size_bytes} | "
+                f"accessed={accessed_at or 'NULL'} | modified={modified_at} | depth={depth}"
+            )
+
+    print(f"\nTotal: {total} row{'s' if total > 1 else ''}")
+
+
+def _run_interactive_db_query(db_path: Path) -> int:
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM files")
+        total_rows = cur.fetchone()[0]
+    except sqlite3.Error as exc:
+        print(f"ERROR: Could not read database '{db_path}': {exc}")
+        conn.close()
+        return 1
+
+    print(f"Loaded database: {db_path}")
+    print(f"Rows in files table: {total_rows}")
+
+    menu = (
+        "\nChoose a query:\n"
+        "  1) Query by access date (older than N days)\n"
+        "  2) Query by size (minimum bytes)\n"
+        "  3) Query by name (substring)\n"
+        "  q) Quit\n"
+    )
+
+    try:
+        while True:
+            print(menu)
+            choice = input("Select option: ").strip().lower()
+            if choice in {"q", "quit", "exit"}:
+                return 0
+
+            if choice == "1":
+                days = _prompt_int("Show entries not accessed for at least N days: ", minimum=0)
+                cur.execute(
+                    """
+                    SELECT path, is_dir, size_bytes, modified_at, accessed_at, depth
+                    FROM files
+                    WHERE accessed_at IS NOT NULL
+                      AND datetime(accessed_at) <= datetime('now', ?)
+                    ORDER BY datetime(accessed_at) ASC
+                    """,
+                    (f"-{days} days",),
+                )
+                rows = cur.fetchall()
+                print(f"\nResults for access date query (>= {days} days old):")
+                _print_db_query_rows(rows)
+            elif choice == "2":
+                min_size = _prompt_int("Minimum size in bytes: ", minimum=0)
+                cur.execute(
+                    """
+                    SELECT path, is_dir, size_bytes, modified_at, accessed_at, depth
+                    FROM files
+                    WHERE size_bytes >= ?
+                    ORDER BY size_bytes DESC, path ASC
+                    """,
+                    (min_size,),
+                )
+                rows = cur.fetchall()
+                print(f"\nResults for size query (>= {min_size} bytes):")
+                _print_db_query_rows(rows)
+            elif choice == "3":
+                term = input("Name/path contains: ").strip()
+                if term == "":
+                    print("Search term cannot be empty.")
+                    continue
+                cur.execute(
+                    """
+                    SELECT path, is_dir, size_bytes, modified_at, accessed_at, depth
+                    FROM files
+                    WHERE path LIKE ?
+                    ORDER BY path ASC
+                    """,
+                    (f"%{term}%",),
+                )
+                rows = cur.fetchall()
+                print(f"\nResults for name query ('{term}'):")
+                _print_db_query_rows(rows)
+            else:
+                print("Invalid option. Choose 1, 2, 3, or q.")
+    except EOFError:
+        print("\nInput stream closed. Exiting interactive mode.")
+        return 0
+    finally:
+        conn.close()
 
 
 def parse_config(config_path: Path) -> dict:
@@ -411,13 +544,13 @@ def _build_subcommand_parser() -> argparse.ArgumentParser:
     """Build a dedicated parser for explicit subcommands."""
     parser = argparse.ArgumentParser(
         prog="purgep",
-        description="Run scan and query as separate steps.",
+        description="Run scan and sqlquery as separate steps.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     scan_parser = subparsers.add_parser(
         "scan",
-        help="Scan directories and optionally save scan JSON.",
+        help="Scan directories and write scan results to SQLite.",
     )
     scan_parser.add_argument(
         "directories",
@@ -461,7 +594,7 @@ def _build_subcommand_parser() -> argparse.ArgumentParser:
     sqlquery_parser = subparsers.add_parser(
         "sqlquery",
         help=(
-            "Query the LLM using a SQLite database produced by 'purgep scan --save-db'. "
+            "Query the LLM using a SQLite database produced by 'purgep scan'. "
             "The LLM generates SQL SELECT queries instead of receiving the full file list, "
             "which drastically reduces token usage for large scans."
         ),
@@ -469,7 +602,7 @@ def _build_subcommand_parser() -> argparse.ArgumentParser:
     sqlquery_parser.add_argument(
         "db_file",
         metavar="DB",
-        help="SQLite database file produced by 'purgep scan --save-db'.",
+        help="SQLite database file produced by 'purgep scan'.",
     )
     sqlquery_parser.add_argument(
         "--api-url",
@@ -495,6 +628,16 @@ def _build_subcommand_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=True,
         help="Enable verbose/debug logging (enabled by default).",
+    )
+
+    dbquery_parser = subparsers.add_parser(
+        "dbquery",
+        help="Run an interactive query menu against a scan SQLite database.",
+    )
+    dbquery_parser.add_argument(
+        "db_file",
+        metavar="DB",
+        help="SQLite database file produced by 'purgep scan'.",
     )
 
     return parser
@@ -624,8 +767,8 @@ def main(argv: List[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
 
-    # Dispatch to subcommand parser if first arg is a known/legacy subcommand token.
-    if argv and argv[0] in {"scan", "query", "sqlquery"}:
+    # Dispatch to subcommand parser if first arg is a known subcommand token.
+    if argv and argv[0] in {"scan", "sqlquery", "dbquery"}:
         parser = _build_subcommand_parser()
         args = parser.parse_args(argv)
         logging.basicConfig(
@@ -761,6 +904,15 @@ def main(argv: List[str] | None = None) -> int:
                 _print_text_report(report, threshold=args.threshold)
 
             return exit_code
+        elif args.command == "dbquery":
+            db_path = Path(args.db_file)
+            if not db_path.exists():
+                print(f"ERROR: Database file not found: {db_path}", file=sys.stderr)
+                return 1
+            if not sys.stdin.isatty():
+                print("ERROR: dbquery requires a TTY stdin", file=sys.stderr)
+                return 1
+            return _run_interactive_db_query(db_path)
         else:
             print(f"Unknown subcommand: {args.command}", file=sys.stderr)
             return 2

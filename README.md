@@ -200,6 +200,7 @@ bash review_purge.sh
 ```
 purgep scan DIR [DIR ...] [SCAN_OPTIONS]
 purgep sqlquery DB [SQLQUERY_OPTIONS]
+purgep dbquery DB
 ```
 
 
@@ -275,6 +276,43 @@ purgep sqlquery old_project_scan.db \
   --model llama3.2:3b
 ```
 
+### Interactive database queries (manual exploration)
+
+After scanning, you can interactively explore the SQLite database without using an LLM:
+
+```bash
+purgep dbquery scan.db
+```
+
+This launches an interactive menu where you can query the database by:
+1. **Access date** – Find files not accessed for N days
+2. **Size** – Find files larger than N bytes
+3. **Name** – Find files with a substring in their path
+
+Results are displayed with smart pagination:
+- Shows first and last 5 rows for large result sets
+- Displays total count at the bottom
+- Useful for understanding what's in the scan before deciding to invoke the LLM
+
+Example session:
+```
+Loaded database: scan.db
+Rows in files table: 23
+
+Choose a query:
+  1) Query by access date (older than N days)
+  2) Query by size (minimum bytes)
+  3) Query by name (substring)
+  q) Quit
+
+Select option: 1
+Show entries not accessed for at least N days: 30
+
+Results for access date query (>= 30 days old):
+  1. nested/old_stuff/ancient.dat | file | size=256 | accessed=2026-01-24T14:54:29.956151+00:00 | modified=2026-01-24T14:54:29.956151+00:00 | depth=2
+
+Total: 1 rows
+```
 
 ### JSON output (for scripting)
 
