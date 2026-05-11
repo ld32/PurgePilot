@@ -8,7 +8,7 @@ and generates a review script. Nothing is deleted automatically.
 
 - Works with local Ollama or remote OpenAI-compatible endpoints
 - Uses a two-step workflow: scan first, query later
-- Stores scan results in SQLite by default
+- Uses SQL query mode by default (scan to SQLite, then query with `sqlquery`)
 - Supports rule-based keep/delete/move behavior via config
 - Includes conservative bioinformatics temporary-file defaults
 
@@ -34,8 +34,8 @@ Typical bioinformatics temporary patterns include:
 3. Score: receive confidence per path (0.0 keep, 1.0 purge).
 4. Review: optionally write a shell script with suggested move/delete commands.
 
-For large scans, SQL query mode keeps prompts small by sending schema and row
-count instead of the full list.
+SQL query mode is the default workflow. It keeps prompts small by sending
+schema and row count instead of the full list.
 
 ## Install
 
