@@ -17,11 +17,17 @@ Home directories on HPC clusters have tight quotas (typically 50–500 GB) and f
   - stale virtual environments and conda environments no longer in use
   - Jupyter notebook checkpoint directories (.ipynb_checkpoints)
   - large temporary files left in ~/tmp or ~/scratch_*
+  - bioinformatics workflow leftovers such as Snakemake metadata/tmp folders,
+    Nextflow cache/log files, Cromwell execution scratch directories, STAR
+    temporary directories (_STARtmp), and samtools/sort temporary files
 
 For each file/folder evaluate how safe it is to purge it from the home directory.
 Assign a confidence score from 0.0 (must keep) to 1.0 (safe to delete).
 Prefer high confidence for well-known disposable patterns (caches, build artefacts, core dumps).
 Be conservative with unfamiliar paths, source code, or data that looks unique.
+Be especially conservative with real research outputs and inputs such as FASTQ,
+BAM, CRAM, VCF, BCF, GTF, count matrices, reference indices, notebooks, and
+pipeline scripts unless the path clearly indicates a temporary or incomplete file.
 ```
 
 ## Important Data (Never purge or move)
@@ -65,15 +71,24 @@ Update this to match your cluster's scratch filesystem layout.
 Known-safe throwaway files that can be deleted without review.
 These are regenerable caches, build artefacts, and temporary files.
 
-- ~/.conda/pkgs/
-- ~/.cache/pip/
-- ~/.cache/huggingface/
-- ~/.cache/torch/
+- .conda/pkgs/
+- .cache/pip/
+- .cache/huggingface/
+- .cache/torch/
 - ondemand/ 
-- ~/tmp/ 
+- tmp/ 
 - *.tmp
 - *.o
 - *.pyc
 - __pycache__/
 - .ipynb_checkpoints/
 - core.*
+- .snakemake/tmp/
+- .snakemake/log/
+- .snakemake/incomplete/
+- .snakemake/metadata/
+- .nextflow/cache/
+- .nextflow.log*
+- *_STARtmp*
+- *.samtools.tmp*
+- *.sort.tmp.*

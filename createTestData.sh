@@ -21,6 +21,7 @@ mkdir -p Downloads archive old_projects results jobs
 
 # Trash Data (folders only)
 mkdir -p .conda/pkgs .cache/pip .cache/huggingface .cache/torch ondemand tmp __pycache__ .ipynb_checkpoints
+mkdir -p .snakemake/tmp .snakemake/log .snakemake/incomplete .snakemake/metadata .nextflow/cache sample_STARtmp
 
 # Top-level test folders
 mkdir -p normal_dir nested/hidden_dir
@@ -38,6 +39,13 @@ head -c 512 </dev/urandom > jobs/job2.err
 head -c 512 </dev/urandom > .cache/pip/pip_cache_file
 head -c 512 </dev/urandom > __pycache__/module.pyc
 head -c 512 </dev/urandom > .ipynb_checkpoints/checkpoint.ipynb
+head -c 512 </dev/urandom > .snakemake/tmp/job123.tmp
+head -c 512 </dev/urandom > .snakemake/log/snakemake.log
+head -c 512 </dev/urandom > .snakemake/incomplete/sample.partial
+head -c 512 </dev/urandom > .snakemake/metadata/rule.json
+head -c 512 </dev/urandom > .nextflow/cache/task123.bin
+head -c 512 </dev/urandom > .nextflow.log
+head -c 512 </dev/urandom > sample_STARtmp/chunk_001.tmp
 
 # Hidden files and dirs
 mkdir -p .hidden_folder
