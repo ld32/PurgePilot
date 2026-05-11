@@ -21,6 +21,7 @@ offenders that silently consume quota:
 - **downloaded archives** – tarballs, zip files that were never cleaned up
 - **old module builds** – stale `~/.local/lib/` installs from previous projects
 - **Jupyter/notebook artefacts** – `.ipynb_checkpoints/`, large output cells saved to disk
+- **bioinformatics workflow tmp files** – e.g. `.snakemake/tmp/`, `.snakemake/log/`, `.nextflow/cache/`, `.nextflow.log*`, `*_STARtmp*`
 
 PurgePilot gives you an AI-ranked list of what to delete, move to scratch
 space, or keep — without making any changes itself unless you explicitly
@@ -33,7 +34,7 @@ approve and run the generated shell script.
 1. **Scan** – PurgePilot walks your home directory (or any subdirectory) and
   collects metadata (path, size, last-modified timestamp, last-accessed timestamp) for every file and
   sub-folder.
-2. **Ask** – The scan results are sent (as a file list or as a SQLite database) to any
+2. **Ask** – The scan metadata is used to query any
   [OpenAI-compatible](https://platform.openai.com/docs/api-reference/chat)
   chat-completions endpoint (local [Ollama](https://ollama.com), OpenAI, etc.) using the two-step workflow.
 3. **Estimate** – The LLM returns a confidence score (`0.0` = keep,
@@ -212,7 +213,7 @@ purgep sqlquery scan.db --model llama3
 ```
 
 The two-step (split) workflow is the default: scan first, query separately.
-This lets you inspect what was found before sending it to an LLM, and reuse
+This lets you inspect what was found before querying an LLM, and reuse
 the same scan with different models or thresholds.
 
 ### Typical HPC workflow
@@ -335,9 +336,22 @@ Edit `config.md` to customise PurgePilot's behaviour for your cluster:
 | **Important Data** | Paths that are **never** purged (e.g. `~/.ssh`, `~/bin`) |
 | **Recycle Bin Data** | Paths moved to scratch space before deletion |
 | **Recycle Bin Path** | Scratch destination (default: cluster scratch under `$USER`) |
-| **Trash Data** | Paths that are **always** deleted (caches, temp files) |
+| **Trash Data** | Paths that are **always** deleted (caches, temp files, and known bioinformatics workflow tmp folders) |
 
 Pass a custom config file with `--config /path/to/my_config.md`.
+
+### Bioinformatics defaults
+
+The default `config.md` includes conservative workflow-temp patterns that are
+usually safe to purge, such as:
+
+- `.snakemake/tmp/`, `.snakemake/log/`, `.snakemake/incomplete/`, `.snakemake/metadata/`
+- `.nextflow/cache/`, `.nextflow.log*`
+- `*_STARtmp*`, `*.samtools.tmp*`, `*.sort.tmp.*`
+
+PurgePilot treats likely research outputs with caution (for example `*.fastq*`,
+`*.bam`, `*.cram`, `*.vcf*`, `*.bcf`, count matrices, references, and pipeline scripts)
+unless a path clearly indicates temporary/intermediate data.
 
 ---
 
